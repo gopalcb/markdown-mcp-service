@@ -30,3 +30,9 @@ and URI parsing before pattern matching to reject userinfo/ambiguous callbacks.
 Reference templates permit secret-value reads only through CloudFormation to meet
 AWS resource-handler stabilization requirements. Ordinary CI cannot read secrets;
 the task reads only the exact key. Deployer policy is 8063 bytes.
+
+Final AWS managed-login documentation check found a separate required OTP setting:
+ALLOW_USER_AUTH on the dedicated client. Added it without changing pool policy or
+other clients, with a template regression assertion. First adapter deployment
+run41057238373 is still in progress; follow-up config deployment is required.
+Source: https://docs.aws.amazon.com/cognito/latest/developerguide/authentication-flows-selection-managedlogin.html

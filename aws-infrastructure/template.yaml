@@ -130,7 +130,7 @@ Resources:
       GenerateSecret: false
       EnableTokenRevocation: true
       PreventUserExistenceErrors: ENABLED
-      ExplicitAuthFlows: [ALLOW_REFRESH_TOKEN_AUTH]
+      ExplicitAuthFlows: [ALLOW_USER_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
       AllowedOAuthFlowsUserPoolClient: !If [EnableOAuth, true, false]
       AllowedOAuthFlows: !If [EnableOAuth, [code], !Ref AWS::NoValue]
       AllowedOAuthScopes: !If [EnableOAuth, [openid, email, markdown-api/write], !Ref AWS::NoValue]

@@ -211,6 +211,10 @@ def test_oauth_resources_have_retention_ttl_and_narrow_permissions() -> None:
     template = yaml.load(
         (deploy.ROOT / 'aws-infrastructure/template.yaml').read_text(), Loader=loader
     )
+    assert template['Resources']['Client']['Properties']['ExplicitAuthFlows'] == [
+        'ALLOW_USER_AUTH',
+        'ALLOW_REFRESH_TOKEN_AUTH',
+    ]
     table = template['Resources']['OAuthState']
     secret = template['Resources']['OAuthKey']
     assert table['DeletionPolicy'] == secret['DeletionPolicy'] == 'Retain'
