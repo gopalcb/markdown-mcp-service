@@ -1,0 +1,44 @@
+{
+  "endpoint": "https://d3cjbof2ij7jy9.cloudfront.net/mcp/",
+  "origin": "https://ma-b3704d923a424812b95854c699ddeb9e.ecs.ca-central-1.on.aws",
+  "distribution_id": "E3BS4AEVAMTQSF",
+  "image": "249766001220.dkr.ecr.ca-central-1.amazonaws.com/markdown-mcp-service@sha256:67839b457f11af8f44eca3dc01290ccc7c0817d4a629619f1eb4c5a1999d0b05",
+  "client_id": "4b7pjdn3vjsrb0rbadrarco4sl",
+  "oauth_configured": "false",
+  "authenticated_upload_verified": false,
+  "verification": {
+    "/health": {
+      "status": 200,
+      "body": {
+        "status": "ok"
+      },
+      "cache": "Miss from cloudfront",
+      "age": null
+    },
+    "/.well-known/oauth-protected-resource/mcp": {
+      "status": 200,
+      "body": {
+        "resource": "https://d3cjbof2ij7jy9.cloudfront.net/mcp/",
+        "authorization_servers": [
+          "https://cognito-idp.ca-central-1.amazonaws.com/ca-central-1_VwnNJYce8"
+        ],
+        "scopes_supported": [
+          "markdown-api/write"
+        ],
+        "bearer_methods_supported": [
+          "header"
+        ]
+      },
+      "cache": "Miss from cloudfront",
+      "age": null
+    },
+    "/mcp/": {
+      "status": 401,
+      "challenge": "Bearer resource_metadata=\"https://d3cjbof2ij7jy9.cloudfront.net/.well-known/oauth-protected-resource/mcp\"",
+      "cache": "Error from cloudfront"
+    }
+  },
+  "cluster": "softrobots-systems",
+  "service": "markdown-mcp-service",
+  "workflow_run": "https://github.com/gopalcb/markdown-mcp-service/actions/runs/41047704121"
+}
