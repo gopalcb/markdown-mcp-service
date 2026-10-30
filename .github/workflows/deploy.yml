@@ -4,11 +4,6 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      callback_url:
-        description: 'Exact MCP host callback; leave empty to preserve the prior value or keep initial OAuth disabled'
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -50,7 +45,7 @@ jobs:
       - name: Verify image imports and nonroot runtime
         run: |
           docker run --rm --entrypoint python markdown-mcp-service:test -c \
-            'import os; assert os.getuid() != 0; import fastapi, mcp, jwt, boto3'
+            'import os; assert os.getuid() != 0; import fastapi, fastmcp, mcp, jwt, boto3'
       - name: Export the tested image
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         run: docker save -o /tmp/markdown-mcp-image.tar markdown-mcp-service:test
@@ -90,12 +85,7 @@ jobs:
           allowed-account-ids: '249766001220'
           unset-current-credentials: true
       - name: Provision dedicated image, roles and OAuth resources
-        env:
-          MCP_CALLBACK_URL: ${{ inputs.callback_url }}
-        run: |
-          args=()
-          if [ -n "$MCP_CALLBACK_URL" ]; then args+=(--callback "$MCP_CALLBACK_URL"); fi
-          python scripts/deploy.py provision "${args[@]}"
+        run: python scripts/deploy.py provision
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: markdown-mcp-image-${{ github.run_id }}

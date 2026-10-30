@@ -1,9 +1,11 @@
 """Check deployment guards, additive stack parameters and exact rollout matching."""
 
 import importlib.util
+import io
 import json
 from pathlib import Path
 from unittest.mock import Mock, patch
+from urllib.error import HTTPError
 
 import pytest
 import yaml
@@ -26,18 +28,38 @@ def test_local_deployment_is_rejected(monkeypatch):
             deploy.github_session()
 
 
-def test_provision_preserves_existing_callback_and_uses_caller_role():
-    """The additive prerequisite grant is sufficient without a new provisioner role."""
+def test_provision_derives_owned_callback_and_uses_caller_role():
+    """The fixed upstream callback comes from the owned edge, without a guessed host callback."""
     session = Mock()
     client = session.client.return_value
-    client.describe_stacks.return_value = {'Stacks': [{'StackStatus': 'UPDATE_COMPLETE'}]}
+    client.describe_stacks.side_effect = [
+        {'Stacks': [{'StackStatus': 'UPDATE_COMPLETE'}]},
+        {
+            'Stacks': [
+                {
+                    'StackStatus': 'UPDATE_COMPLETE',
+                    'Outputs': [
+                        {
+                            'OutputKey': 'PublicBaseUrl',
+                            'OutputValue': 'https://fixture.cloudfront.net',
+                        }
+                    ],
+                }
+            ]
+        },
+    ]
     with (
         patch.object(deploy, 'verify_existing_cluster'),
         patch.object(deploy, 'wait_stack', return_value={'ClientId': 'client'}),
     ):
-        deploy.provision(session, None)
+        deploy.provision(session)
     request = client.update_stack.call_args.kwargs
-    assert request['Parameters'] == [{'ParameterKey': 'CallbackUrl', 'UsePreviousValue': True}]
+    assert request['Parameters'] == [
+        {
+            'ParameterKey': 'CallbackUrl',
+            'ParameterValue': 'https://fixture.cloudfront.net/auth/callback',
+        }
+    ]
     assert 'RoleARN' not in request
     assert request['StackName'] == 'markdown-mcp-service'
 
@@ -49,16 +71,46 @@ def test_provision_refuses_concurrent_infrastructure_change():
     client.describe_stacks.return_value = {'Stacks': [{'StackStatus': 'UPDATE_IN_PROGRESS'}]}
     with patch.object(deploy, 'verify_existing_cluster'):
         with pytest.raises(RuntimeError, match='must finish'):
-            deploy.provision(session, None)
+            deploy.provision(session)
     client.update_stack.assert_not_called()
 
 
-def test_invalid_callback_rejected_before_aws_write():
-    """A callback cannot be an insecure or fragment-bearing guessed address."""
+def test_invalid_owned_edge_rejected_before_aws_write():
+    """An invalid edge output must never register an attacker callback."""
     session = Mock()
-    with pytest.raises(ValueError, match='HTTPS callback'):
-        deploy.provision(session, 'http://example.org/callback')
-    session.client.assert_not_called()
+    client = session.client.return_value
+    with (
+        patch.object(deploy, 'verify_existing_cluster'),
+        patch.object(
+            deploy,
+            'stack_state',
+            side_effect=[
+                None,
+                {
+                    'StackStatus': 'UPDATE_COMPLETE',
+                    'Outputs': [
+                        {'OutputKey': 'PublicBaseUrl', 'OutputValue': 'https://attacker.example'}
+                    ],
+                },
+            ],
+        ),
+    ):
+        with pytest.raises(ValueError, match='CloudFront origin'):
+            deploy.provision(session)
+    client.create_stack.assert_not_called()
+
+
+def test_first_provision_keeps_oauth_disabled_until_edge_exists():
+    """A fresh install creates state/key resources without registering a guessed callback."""
+    session = Mock()
+    with (
+        patch.object(deploy, 'verify_existing_cluster'),
+        patch.object(deploy, 'stack_state', return_value=None),
+        patch.object(deploy, 'wait_stack', return_value={}),
+    ):
+        deploy.provision(session)
+    request = session.client.return_value.create_stack.call_args.kwargs
+    assert request['Parameters'] == [{'ParameterKey': 'CallbackUrl', 'ParameterValue': ''}]
 
 
 def test_rollout_requires_successful_exact_environment():
@@ -152,6 +204,115 @@ def test_delivery_role_policy_is_complete_and_has_no_self_management():
     assert deploy.SERVICE == 'markdown-mcp-service'
 
 
+def test_oauth_resources_have_retention_ttl_and_narrow_permissions() -> None:
+    """Persist encrypted OAuth state/key while keeping secret values outside deployment access."""
+    loader = type('RuntimeLoader', (yaml.SafeLoader,), {})
+    loader.add_multi_constructor('!', lambda loader, tag, node: None)
+    template = yaml.load(
+        (deploy.ROOT / 'aws-infrastructure/template.yaml').read_text(), Loader=loader
+    )
+    table = template['Resources']['OAuthState']
+    secret = template['Resources']['OAuthKey']
+    assert table['DeletionPolicy'] == secret['DeletionPolicy'] == 'Retain'
+    assert table['UpdateReplacePolicy'] == secret['UpdateReplacePolicy'] == 'Retain'
+    assert table['Properties']['TableName'] == 'markdown-mcp-service-oauth'
+    assert table['Properties']['BillingMode'] == 'PAY_PER_REQUEST'
+    assert table['Properties']['TimeToLiveSpecification'] == {
+        'AttributeName': 'ttl',
+        'Enabled': True,
+    }
+    assert table['Properties']['SSESpecification']['SSEEnabled'] is True
+    assert table['Properties']['KeySchema'] == [
+        {'AttributeName': 'collection', 'KeyType': 'HASH'},
+        {'AttributeName': 'key', 'KeyType': 'RANGE'},
+    ]
+    assert secret['Properties']['GenerateSecretString']['PasswordLength'] >= 32
+    assert 'SecretString' not in secret['Properties']
+    assert set(template['Outputs']) >= {'OAuthStateTable', 'OAuthSecretArn'}
+    policy = json.loads((deploy.ROOT / 'aws-infrastructure/deployer-policy.json').read_text())
+    actions = {
+        action
+        for statement in policy['Statement']
+        for action in (
+            [statement['Action']] if isinstance(statement['Action'], str) else statement['Action']
+        )
+    }
+    secret_reads = [
+        item for item in policy['Statement'] if item['Action'] == 'secretsmanager:GetSecretValue'
+    ]
+    assert len(secret_reads) == 1
+    assert secret_reads[0]['Resource'] == (
+        f'arn:aws:secretsmanager:{deploy.REGION}:{deploy.ACCOUNT}:'
+        'secret:markdown-mcp-service-oauth-key-??????'
+    )
+    assert secret_reads[0]['Condition'] == {
+        'ForAnyValue:StringEquals': {'aws:CalledVia': ['cloudformation.amazonaws.com']}
+    }
+    assert not any(
+        'secretsmanager:GetSecretValue' in item['Action']
+        for item in policy['Statement']
+        if isinstance(item['Action'], list)
+    )
+    assert 'dynamodb:GetItem' not in actions
+    assert not any(statement['Action'] == 'secretsmanager:*' for statement in policy['Statement'])
+    generation = next(item for item in policy['Statement'] if item['Sid'] == 'GenerateMcpOAuthKey')
+    assert generation['Action'] == 'secretsmanager:GetRandomPassword'
+    assert generation['Resource'] == '*'
+    assert generation['Condition']['StringEquals']['aws:RequestedRegion'] == deploy.REGION
+    state = next(item for item in policy['Statement'] if item['Sid'] == 'ManageOnlyMcpOAuthState')
+    assert state['Resource'] == (
+        f'arn:aws:dynamodb:{deploy.REGION}:{deploy.ACCOUNT}:table/markdown-mcp-service-oauth'
+    )
+    assert {
+        'dynamodb:DescribeContinuousBackups',
+        'dynamodb:DescribeContributorInsights',
+        'dynamodb:DescribeKinesisStreamingDestination',
+        'dynamodb:GetResourcePolicy',
+    } <= set(state['Action'])
+
+
+def test_public_verification_requires_real_s256_adapter_discovery() -> None:
+    """Successful health alone cannot hide missing OAuth discovery or wrong resource binding."""
+    base = 'https://fixture.cloudfront.net'
+    metadata = {
+        'issuer': base + '/',
+        'code_challenge_methods_supported': ['S256'],
+        'registration_endpoint': base + '/register',
+        'authorization_endpoint': base + '/authorize',
+        'token_endpoint': base + '/token',
+    }
+    responses = [
+        io.BytesIO(json.dumps(payload).encode())
+        for payload in (
+            {'status': 'ok'},
+            {'resource': base + '/mcp/', 'authorization_servers': [base + '/']},
+            metadata,
+        )
+    ]
+    responses.append(
+        HTTPError(
+            base + '/mcp/',
+            401,
+            'Unauthorized',
+            {'WWW-Authenticate': 'Bearer resource_metadata="x"'},
+            None,
+        )
+    )
+    with patch.object(deploy.urllib.request, 'urlopen', side_effect=responses):
+        deploy.verify_endpoint(base)
+    responses = [
+        io.BytesIO(json.dumps(payload).encode())
+        for payload in (
+            {'status': 'ok'},
+            {'resource': base + '/mcp/', 'authorization_servers': [base + '/']},
+            metadata | {'code_challenge_methods_supported': []},
+        )
+    ]
+    with patch.object(deploy.urllib.request, 'urlopen', side_effect=responses):
+        with pytest.raises(ValueError, match='S256'):
+            deploy.verify_endpoint(base)
+
+
 @pytest.mark.parametrize(
     'repo,role,accepted',
     [
@@ -216,7 +377,9 @@ def test_existing_service_switches_to_cloudfront_audience() -> None:
         'ClientId': 'client',
         'TaskRoleArn': 'task',
         'ExecutionRoleArn': 'execution',
-        'OAuthConfigured': 'false',
+        'OAuthConfigured': 'true',
+        'OAuthStateTable': 'oauth-table',
+        'OAuthSecretArn': 'secret-arn',
     }
     image = (
         f'{deploy.ACCOUNT}.dkr.ecr.{deploy.REGION}.amazonaws.com/markdown-mcp-service@sha256:'
@@ -242,6 +405,9 @@ def test_existing_service_switches_to_cloudfront_audience() -> None:
     assert environment['PUBLIC_BASE_URL'] == edge['PublicBaseUrl']
     assert environment['MCP_RESOURCE'] == edge['PublicBaseUrl'] + '/mcp/'
     assert environment['MCP_ORIGIN_HOST'] == 'origin.ecs.ca-central-1.on.aws'
+    assert environment['COGNITO_DOMAIN'] == deploy.COGNITO_DOMAIN
+    assert environment['OAUTH_STATE_TABLE'] == 'oauth-table'
+    assert environment['OAUTH_SECRET_ARN'] == 'secret-arn'
     assert result['endpoint'] == edge['PublicBaseUrl'] + '/mcp/'
     assert result['origin'] == origin
     ecs.update_express_gateway_service.assert_called_once()
