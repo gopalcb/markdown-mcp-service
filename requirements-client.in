@@ -1,0 +1,3 @@
+# Optional LangChain consumer/test environment; not copied into the server image.
+-c requirements.txt
+langchain[mcp]>=1.4,<1.5

@@ -64,3 +64,16 @@ CloudFormation. Ordinary CI has no direct secret-value or table-item access.
 CloudFormation outputs only the table name and secret ARN. The task role has
 exact-table item access and exact-key read access. The existing document IAM
 partition and S3 prefix permissions are unchanged.
+
+## Tool consumer metadata
+
+The save_markdown discovery entry explicitly advertises a write that is not
+idempotent and uses external storage. Its destructive hint remains conservative
+because saving an existing group/name changes the current version at that key.
+Annotations describe effects for client policy; they never replace server auth.
+Structured results preserve success and per-file READY/INCOMPLETE receipts.
+LangChain integration is client-side; see docs/markdown-mcp-langchain.md.
+
+The optional requirements-client lock installs LangChain MCPAdapter in consumer
+and CI environments. Real adapter tests use ASGI HTTP, signed fixture identity
+and mocked storage; server container dependencies remain independently pinned.

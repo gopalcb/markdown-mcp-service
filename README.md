@@ -41,3 +41,8 @@ Tool arguments:
 `READY` confirms the object and indexed version; `INCOMPLETE` means inspect that `file_id` before retrying. A successful batch has `success: true`. The default group is learning-chatgpt. Paths do not create subdirectories, and files are limited to 256 KiB UTF-8 for compatibility with portal reads.
 
 ChatGPT configuration uses OAuth with dynamic client registration (`client.mode: "dcr"`), scope `markdown-api/write`, and this exact MCP URL. Do not enter the upstream Cognito client ID in ChatGPT: that ID belongs to the adapter. Discovery supplies the registration and authorization endpoints. Cognito's callback is automatically registered as `https://d3cjbof2ij7jy9.cloudfront.net/auth/callback`; downstream ChatGPT callbacks register with the adapter. Approve the service's consent screen and complete Cognito email sign-in privately when the host starts authorization. Saving a plugin is not evidence of a working connection.
+
+LangChain consumers: see [OAuth connection and receipt handling](docs/markdown-mcp-langchain.md).
+
+For LangChain interoperability tests, also install `-r requirements-client.txt`.
+CI installs this client lock and verifies adapter imports and real HTTP fixtures.

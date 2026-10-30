@@ -58,7 +58,15 @@ def create_app(config: dict | None = None, verifier=None, oauth=None) -> FastAPI
         allowed_origins=[config.get('PUBLIC_BASE_URL', 'https://bootstrap.invalid')],
     )
 
-    @mcp.tool()
+    @mcp.tool(
+        title='Save Markdown documents',
+        annotations={
+            'readOnlyHint': False,
+            'destructiveHint': True,
+            'idempotentHint': False,
+            'openWorldHint': True,
+        },
+    )
     async def save_markdown(payload: UploadBatch) -> dict:
         """Save Markdown to Work Organizer. Same group/name creates a new S3 version; partial batches are not atomic. Do not retry unverified files blindly."""
 

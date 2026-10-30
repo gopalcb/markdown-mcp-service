@@ -129,10 +129,12 @@ def test_signature_and_discovery() -> None:
             )
 
 
-def test_sdk_and_upload(monkeypatch) -> None:
+@pytest.mark.parametrize('status', ['READY', 'INCOMPLETE'])
+def test_sdk_and_upload(monkeypatch, status: str) -> None:
     """Initialize real SDK, discover tool schema and invoke its validated storage adapter."""
     storage = importlib.import_module('mcp_services.storage_service')
-    writer = Mock(return_value=[{'name': 'example.md', 'status': 'READY', 'file_id': 'fixture'}])
+    receipts = [{'name': 'example.md', 'status': status, 'file_id': 'fixture'}]
+    writer = Mock(return_value=receipts)
 
     monkeypatch.setattr(storage, 'write_documents', writer)
 
@@ -157,7 +159,16 @@ def test_sdk_and_upload(monkeypatch) -> None:
         tools = client.post(
             '/mcp/', headers=headers(), json={'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'}
         )
-        assert tools.json()['result']['tools'][0]['name'] == 'save_markdown'
+        tool = tools.json()['result']['tools'][0]
+        assert tool['name'] == 'save_markdown'
+        assert tool['title'] == 'Save Markdown documents'
+        assert tool['annotations'] == {
+            'readOnlyHint': False,
+            'destructiveHint': True,
+            'idempotentHint': False,
+            'openWorldHint': True,
+        }
+        assert 'payload' in tool['inputSchema']['properties']
         result = client.post(
             '/mcp/',
             headers=headers(),
@@ -175,6 +186,9 @@ def test_sdk_and_upload(monkeypatch) -> None:
         )
         assert result.status_code == 200
         assert not result.json()['result'].get('isError')
+        assert result.json()['result']['structuredContent'] == {
+            'success': status == 'READY', 'files': receipts,
+        }
         assert writer.call_args.args[0]['username'] == 'gopalcbala'
 
 
