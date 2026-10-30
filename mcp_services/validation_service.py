@@ -84,6 +84,9 @@ def load_config() -> dict:
         'ALLOWED_SUB',
         'S3_BUCKET',
         'USER_FILES_TABLE',
+        'COGNITO_DOMAIN',
+        'OAUTH_STATE_TABLE',
+        'OAUTH_SECRET_ARN',
     ):
         value = os.environ.get(name, '')
 
@@ -112,9 +115,35 @@ def load_config() -> dict:
     ):
         raise ValueError('Invalid Cognito issuer')
 
+    if (
+        config['COGNITO_DOMAIN']
+        != 'https://softrobots-usernames-249766001220.auth.ca-central-1.amazoncognito.com'
+    ):
+        raise ValueError('Invalid Cognito managed login domain')
+
     origin_host = os.environ.get('MCP_ORIGIN_HOST', '')
     if origin_host:
         if not re.fullmatch(r'[a-z0-9-]+\.ecs\.ca-central-1\.on\.aws', origin_host):
             raise ValueError('MCP_ORIGIN_HOST must be the explicit regional ECS hostname')
         config['MCP_ORIGIN_HOST'] = origin_host
     return config
+
+
+def valid_oauth_redirect(value: str) -> bool:
+    """Allow only literal ChatGPT callback paths or local native callback origins."""
+    try:
+        url = urlsplit(value)
+        if url.username or url.password or url.query or url.fragment:
+            return False
+        if url.scheme == 'https' and url.hostname == 'chatgpt.com' and url.port in (None, 443):
+            return url.path == '/connector_platform_oauth_redirect' or bool(
+                re.fullmatch(r'/connector/oauth/[A-Za-z0-9_-]+', url.path)
+            )
+        return bool(
+            url.scheme == 'http'
+            and url.hostname in {'localhost', '127.0.0.1'}
+            and url.port
+            and url.path == '/callback'
+        )
+    except ValueError:
+        return False

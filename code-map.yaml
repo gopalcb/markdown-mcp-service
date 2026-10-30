@@ -21,8 +21,7 @@ files:
       create_app.health:
         summary: Expose container liveness without cloud calls or credentials.
       create_app.protected_resource:
-        summary: Advertise only actual configured resource and Cognito authorization
-          server.
+        summary: Advertise the exact resource and the adapter authorization server.
   mcp_services/__init__.py:
     purpose: Authentication, validation and storage adapters for the Markdown MCP
       boundary.
@@ -42,6 +41,77 @@ files:
       IngressMiddleware.__call__.bounded_receive:
         summary: Deliver the checked bytes once, preserving subsequent disconnect
           events.
+      OAuthIngressMiddleware.__init__:
+        summary: Keep a separate small OAuth request budget and the explicit public/origin
+          hosts.
+      OAuthIngressMiddleware.__call__:
+        summary: Reject oversized or cross-origin OAuth requests before parsing or
+          persistence.
+      OAuthIngressMiddleware.__call__.bounded_receive:
+        summary: Replay the bounded OAuth body once without retaining unbounded input.
+      OAuthIngressMiddleware.__call__.private_send:
+        summary: Keep authorization query data out of browser caches and referrers.
+  mcp_services/oauth_service.py:
+    purpose: Bridge ChatGPT OAuth to Cognito without exposing upstream tokens to the
+      client.
+    functions:
+      CognitoVerifier.__init__:
+        summary: Set required scopes and a bounded JWKS fetcher, or fixture key source.
+      CognitoVerifier.verify_token:
+        summary: Verify Cognito before issuing or accepting any proxy authorization.
+      MarkdownOAuthProxy.__init__:
+        summary: Use shared atomic redemption storage alongside the encrypted library
+          store.
+      MarkdownOAuthProxy.register_client:
+        summary: Reject userinfo and ambiguous redirects before applying library DCR
+          policy.
+      MarkdownOAuthProxy.exchange_authorization_code:
+        summary: Claim a code atomically after the SDK validates client, redirect
+          and PKCE.
+      MarkdownOAuthProxy.exchange_refresh_token:
+        summary: Permit only one use of a rotating proxy refresh token across all
+          tasks.
+      MarkdownOAuthProxy.load_access_token:
+        summary: Keep downstream token/client identity for client-bound revocation
+          checks.
+      MarkdownOAuthProxy.verify_claims:
+        summary: Adapt verified proxy tokens to the existing authenticated ingress
+          contract.
+      MarkdownOAuthProxy.revoke_token:
+        summary: Invalidate all tokens in the local session and revoke the upstream
+          refresh token.
+      MarkdownOAuthProxy.session_revoked:
+        summary: Check the shared tombstone so racing refreshes cannot resurrect a
+          revoked session.
+      MarkdownOAuthProxy.revoke_public_client:
+        summary: Accept RFC 7009 public clients without the SDK's erroneously required
+          secret field.
+      MarkdownOAuthProxy.get_routes:
+        summary: Retain maintained OAuth routes and replace only the public-client
+          revocation bug.
+      create_oauth:
+        summary: Build the maintained adapter with a persistent key and encrypted
+          shared state.
+  mcp_services/oauth_storage.py:
+    purpose: Persist encrypted OAuth state with strong reads and atomic redemption
+      claims.
+    functions:
+      OAuthStateStore.__init__:
+        summary: Use an injected low-level client; never create resources at runtime.
+      OAuthStateStore.item_key:
+        summary: Hash keys so authorization codes and client identifiers are not stored
+          raw.
+      OAuthStateStore._get_managed_entry:
+        summary: Implement the library hook with a strongly consistent, expiry-checked
+          read.
+      OAuthStateStore._put_managed_entry:
+        summary: Implement the library hook; expire otherwise permanent client records
+          after 90 days.
+      OAuthStateStore._delete_managed_entry:
+        summary: Implement the library hook and return whether a record actually existed.
+      OAuthStateStore.claim_once:
+        summary: Atomically claim a validated grant across overlapping tasks; never
+          retry redemption.
   mcp_services/storage_service.py:
     purpose: Adapt validated MCP input to the exact production document storage service.
     functions:
@@ -62,6 +132,9 @@ files:
       load_config:
         summary: Fail startup for incomplete enabled configurations; permit deny-all
           bootstrap.
+      valid_oauth_redirect:
+        summary: Allow only literal ChatGPT callback paths or local native callback
+          origins.
   scripts/deploy.py:
     purpose: 'Provision and deploy only Markdown MCP through the main-branch GitHub
       role.
@@ -71,7 +144,10 @@ files:
 
       ECS Express owns HTTPS ingress. A health-only first revision obtains its hostname
 
-      before the enabled revision binds the exact OAuth audience. No credentials persist.'
+      before the enabled revision binds the exact OAuth audience. OAuth state and
+      key
+
+      material persist only in the owned table and secret, never deployment artifacts.'
     functions:
       github_session:
         summary: Reject local mutation and unrelated repository, account, branch or
@@ -85,8 +161,8 @@ files:
       verify_existing_cluster:
         summary: Require the existing cluster and never create a replacement cluster.
       provision:
-        summary: Apply the dedicated stack using the independent GitHub role and existing
-          ECS cluster.
+        summary: Apply owned resources and derive the fixed Cognito callback from
+          the edge stack.
       provision_edge:
         summary: Bind a dedicated uncached CloudFront distribution to the existing
           Express origin.
@@ -104,7 +180,8 @@ files:
       wait_service:
         summary: Require the matching image/environment revision's successful deployment.
       verify_endpoint:
-        summary: Make one final bounded health, metadata and anonymous-denial check.
+        summary: Check public health, real S256 discovery, resource binding and anonymous
+          denial once.
       deploy:
         summary: Create a health-only bootstrap if needed, then deploy the bound MCP
           resource.
@@ -118,13 +195,16 @@ files:
       test_local_deployment_is_rejected:
         summary: A valid AWS identity alone must never enable local infrastructure
           writes.
-      test_provision_preserves_existing_callback_and_uses_caller_role:
-        summary: The additive prerequisite grant is sufficient without a new provisioner
-          role.
+      test_provision_derives_owned_callback_and_uses_caller_role:
+        summary: The fixed upstream callback comes from the owned edge, without a
+          guessed host callback.
       test_provision_refuses_concurrent_infrastructure_change:
         summary: Do not issue another update while the owned stack is changing.
-      test_invalid_callback_rejected_before_aws_write:
-        summary: A callback cannot be an insecure or fragment-bearing guessed address.
+      test_invalid_owned_edge_rejected_before_aws_write:
+        summary: An invalid edge output must never register an attacker callback.
+      test_first_provision_keeps_oauth_disabled_until_edge_exists:
+        summary: A fresh install creates state/key resources without registering a
+          guessed callback.
       test_rollout_requires_successful_exact_environment:
         summary: A prior health-only revision with the same image cannot pass activation.
       test_deploy_requires_dedicated_immutable_image:
@@ -135,6 +215,12 @@ files:
       test_delivery_role_policy_is_complete_and_has_no_self_management:
         summary: Independent delivery owns only its service and cannot create clusters
           or edit its identity.
+      test_oauth_resources_have_retention_ttl_and_narrow_permissions:
+        summary: Persist encrypted OAuth state/key while keeping secret values outside
+          deployment access.
+      test_public_verification_requires_real_s256_adapter_discovery:
+        summary: Successful health alone cannot hide missing OAuth discovery or wrong
+          resource binding.
       test_independent_repository_identity_is_required:
         summary: Old Softrobots identity or another repository cannot deploy this
           standalone service.
@@ -222,6 +308,71 @@ files:
           checks.
       test_origin_hostname_config_rejects_urls_ports_and_arbitrary_hosts:
         summary: Only the literal regional ECS hostname can extend the SDK Host allowlist.
+      test_oauth_redirect_rejects_ambiguous_origins:
+        summary: Do not let wildcard redirect patterns admit userinfo or attacker
+          origins.
+  tests/test_oauth.py:
+    purpose: Exercise the real OAuth adapter with signed Cognito fixtures and encrypted
+      shared state.
+    functions:
+      FakeDynamo.__init__:
+        summary: Share records safely across ASGI threads and adapter instances.
+      FakeDynamo.get_item:
+        summary: Record consistent-read intent and return a detached item snapshot.
+      FakeDynamo.put_item:
+        summary: Enforce DynamoDB's conditional create under a lock.
+      FakeDynamo.delete_item:
+        summary: Return the removed record as DynamoDB ALL_OLD does.
+      oauth_setup:
+        summary: Build real adapter and fixture upstream endpoints, never making external
+          requests.
+      oauth_setup.fetch_token:
+        summary: Emulate Cognito code exchange while checking dedicated-client PKCE
+          binding.
+      oauth_setup.refresh_token:
+        summary: Return a fresh audience-bound upstream token and record refresh use.
+      oauth_setup.revoke:
+        summary: Accept only the expected private Cognito refresh-token revocation.
+      register:
+        summary: Register a public DCR client through the actual SDK endpoint.
+      begin_consent:
+        summary: Follow authorization to the consent form and recover only fixture
+          hidden fields.
+      authorize:
+        summary: Approve real consent and emulate the upstream browser callback with
+          cookies intact.
+      exchange:
+        summary: Exchange a downstream code at the real public-client token endpoint.
+      tool_list:
+        summary: Use the issued reference token on the actual stateless MCP transport.
+      test_oauth_exchange_restart_refresh_revoke:
+        summary: Run DCR, consent, PKCE, encrypted restart, rotating refresh and session
+          revocation.
+      test_consent_state_redirect_and_csrf_fail_closed:
+        summary: Reject malicious redirects, unbound callbacks, wrong state and missing
+          consent CSRF.
+      test_upstream_authorization_failure_cannot_mint_tokens:
+        summary: Reject correctly signed Cognito tokens that fail any required authorization
+          binding.
+      test_concurrent_code_exchange_and_expiry:
+        summary: Permit one redemption across two independently created adapters sharing
+          DynamoDB.
+      test_revocation_and_refresh_are_bound_to_registered_client:
+        summary: A second public client cannot refresh or invalidate another client's
+          session.
+      test_oauth_ingress_bounds_host_origin_and_private_response_headers:
+        summary: Reject hostile OAuth inputs before persistence and keep normal responses
+          private.
+      test_upstream_callback_exception_does_not_expose_sensitive_detail:
+        summary: Replace upstream failure HTML with a generic private error without
+          credentials.
+      test_upstream_callback_exception_does_not_expose_sensitive_detail.failed_exchange:
+        summary: Raise a sensitive fixture diagnostic at the external token boundary.
+      test_revoke_during_refresh_cannot_resurrect_session:
+        summary: A shared revocation tombstone defeats an overlapping upstream refresh
+          write.
+      test_revoke_during_refresh_cannot_resurrect_session.paused_refresh:
+        summary: Pause the upstream response while another task revokes the session.
   tests/test_storage_contract.py:
     purpose: Protect the independent source snapshot and version-pinned overwrite
       contract.

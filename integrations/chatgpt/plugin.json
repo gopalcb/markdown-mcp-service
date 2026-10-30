@@ -1,0 +1,21 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "author": {
+    "email": "gopalcbala@gmail.com",
+    "name": "Gopal Chandra"
+  },
+  "description": "Connect to the private Markdown MCP service using Cognito OAuth.",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "capabilities": [],
+        "developerName": "Gopal Chandra",
+        "displayName": "GB Markdown MCP",
+        "longDescription": "Connect to the existing Markdown MCP service. Sign in through Cognito to authorize access.",
+        "shortDescription": "Save Markdown with Cognito"
+      }
+    }
+  },
+  "name": "gb-markdown-mcp",
+  "version": "0.2.0"
+}
