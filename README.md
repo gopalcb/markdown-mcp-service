@@ -5,7 +5,7 @@ file-group: workflow-docs
 
 Authenticated `save_markdown` uploads to the existing Work Organizer versioned storage and index. Standalone project and repository for independent image builds and GitHub deployment. It uses a dedicated service/container in the existing `softrobots-systems` ECS cluster; no new cluster is provisioned. See [architecture](ARCHITECTURE.md) and [deployment](DEPLOYMENT.md).
 
-Deployed CloudFront MCP endpoint: [https://d3cjbof2ij7jy9.cloudfront.net/mcp/](https://d3cjbof2ij7jy9.cloudfront.net/mcp/). Health, metadata and anonymous rejection are verified. OAuth login remains disabled until the real host callback is registered; authenticated uploads are not yet verified. See [deployment evidence](docs/tasks/2026-10-30-cloudfront/summary.md).
+Canonical CloudFront MCP endpoint: [https://d3cjbof2ij7jy9.cloudfront.net/mcp/](https://d3cjbof2ij7jy9.cloudfront.net/mcp/). The OAuth adapter supplies discovery, dynamic client registration and Cognito sign-in. Deployment and private acceptance status are recorded in [OAuth repair evidence](docs/tasks/2026-10-30-chatgpt-oauth/summary.md).
 
 Build from the repository root:
 
@@ -30,7 +30,7 @@ MCP_ENABLED=false PYTHONPATH=. \
 
 Behind CloudFront, also set `MCP_ORIGIN_HOST` to the explicit ECS origin hostname; do not set it from request headers.
 
-For an enabled service supply `PUBLIC_BASE_URL` (HTTPS origin, no trailing slash), `MCP_RESOURCE` (exact origin plus `/mcp/`), `COGNITO_ISSUER`, dedicated `COGNITO_CLIENT_ID`, `MCP_WRITE_SCOPE`, `ALLOWED_SUB`, `S3_BUCKET`, `USER_FILES_TABLE` and the AWS region. Use workload credentials; never set token variables. The exact connection URL includes `/mcp/`.
+For an enabled service supply `PUBLIC_BASE_URL` (HTTPS origin, no trailing slash), `MCP_RESOURCE` (exact origin plus `/mcp/`), `COGNITO_ISSUER`, dedicated `COGNITO_CLIENT_ID`, `MCP_WRITE_SCOPE`, `ALLOWED_SUB`, `S3_BUCKET`, `USER_FILES_TABLE`, `COGNITO_DOMAIN`, `OAUTH_STATE_TABLE`, `OAUTH_SECRET_ARN` and the AWS region. The runtime reads its persistent signing key from Secrets Manager; never supply that key through config or deployment inputs. Use workload credentials; never set token variables. The exact connection URL includes `/mcp/`.
 
 Tool arguments:
 
@@ -40,4 +40,4 @@ Tool arguments:
 
 `READY` confirms the object and indexed version; `INCOMPLETE` means inspect that `file_id` before retrying. A successful batch has `success: true`. The default group is learning-chatgpt. Paths do not create subdirectories, and files are limited to 256 KiB UTF-8 for compatibility with portal reads.
 
-Real host login requires its exact callback, PKCE and resource-bound access tokens. The resource server does not implement client registration or an OAuth broker. Discovery compatibility, OTP, refresh and revocation need real host verification. AWS describes resource binding in its [authorization endpoint documentation](https://docs.aws.amazon.com/cognito/latest/developerguide/authorization-endpoint.html).
+ChatGPT configuration uses OAuth with dynamic client registration (`client.mode: "dcr"`), scope `markdown-api/write`, and this exact MCP URL. Do not enter the upstream Cognito client ID in ChatGPT: that ID belongs to the adapter. Discovery supplies the registration and authorization endpoints. Cognito's callback is automatically registered as `https://d3cjbof2ij7jy9.cloudfront.net/auth/callback`; downstream ChatGPT callbacks register with the adapter. Approve the service's consent screen and complete Cognito email sign-in privately when the host starts authorization. Saving a plugin is not evidence of a working connection.

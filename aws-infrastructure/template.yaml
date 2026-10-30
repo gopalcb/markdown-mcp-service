@@ -1,11 +1,11 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Dedicated Markdown MCP image, task identities and Cognito client; existing storage and users are unchanged.
+Description: Dedicated Markdown MCP image, OAuth state, task identities and Cognito client; existing documents and users are unchanged.
 Parameters:
   CallbackUrl:
     Type: String
     Default: ''
-    AllowedPattern: '^$|https://[^\s#]+$'
-    Description: Exact callback displayed by the real MCP host; empty keeps OAuth disabled.
+    AllowedPattern: '^$|https://[a-z0-9]+\.cloudfront\.net/auth/callback$'
+    Description: Owned CloudFront OAuth adapter callback; deployment derives it from the edge stack.
 Conditions:
   EnableOAuth: !Not [!Equals [!Ref CallbackUrl, '']]
 Resources:
@@ -22,6 +22,35 @@ Resources:
     Properties:
       LogGroupName: /markdown-mcp-service
       RetentionInDays: 7
+  OAuthState:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: markdown-mcp-service-oauth
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: collection, AttributeType: S}
+        - {AttributeName: key, AttributeType: S}
+      KeySchema:
+        - {AttributeName: collection, KeyType: HASH}
+        - {AttributeName: key, KeyType: RANGE}
+      TimeToLiveSpecification: {AttributeName: ttl, Enabled: true}
+      SSESpecification: {SSEEnabled: true}
+      Tags:
+        - {Key: Project, Value: markdown-mcp-service}
+  OAuthKey:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: markdown-mcp-service-oauth-key
+      Description: Persistent Markdown MCP OAuth signing and state encryption material
+      GenerateSecretString:
+        PasswordLength: 64
+        ExcludePunctuation: true
+      Tags:
+        - {Key: Project, Value: markdown-mcp-service}
   TaskRole:
     Type: AWS::IAM::Role
     Properties:
@@ -49,6 +78,16 @@ Resources:
               - Effect: Deny
                 Action: [s3:DeleteObject, s3:DeleteObjectVersion]
                 Resource: arn:aws:s3:::agent-work-history--249766001220-ca-central-1/*
+        - PolicyName: ManageOwnedOAuthState
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:DeleteItem]
+                Resource: !GetAtt OAuthState.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref OAuthKey
   ExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -118,3 +157,7 @@ Outputs:
     Value: !GetAtt ExecutionRole.Arn
   OAuthConfigured:
     Value: !If [EnableOAuth, 'true', 'false']
+  OAuthStateTable:
+    Value: !Ref OAuthState
+  OAuthSecretArn:
+    Value: !Ref OAuthKey

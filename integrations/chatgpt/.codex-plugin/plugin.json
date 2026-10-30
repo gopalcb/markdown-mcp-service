@@ -1,0 +1,20 @@
+{
+  "interface": {
+    "capabilities": [],
+    "developerName": "Gopal Chandra",
+    "displayName": "GB Markdown MCP",
+    "longDescription": "Connect to the existing Markdown MCP service. Sign in through Cognito to authorize access.",
+    "shortDescription": "Save Markdown with Cognito",
+    "category": "Other",
+    "defaultPrompt": null
+  },
+  "name": "gb-markdown-mcp",
+  "version": "0.2.0",
+  "description": "Connect to the private Markdown MCP service using Cognito OAuth.",
+  "author": {
+    "name": "Gopal Chandra",
+    "email": "gopalcbala@gmail.com"
+  },
+  "keywords": [],
+  "mcpServers": "./.mcp.json"
+}

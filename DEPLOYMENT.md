@@ -122,39 +122,51 @@ and [default CloudFront certificate behavior](https://docs.aws.amazon.com/AWSClo
 
 ## Connect OAuth privately
 
-The current owner `gopalcbala` belongs to pool `ca-central-1_VwnNJYce8`. The issuer
-is `https://cognito-idp.ca-central-1.amazonaws.com/ca-central-1_VwnNJYce8`; managed
-login uses `https://softrobots-usernames-249766001220.auth.ca-central-1.amazoncognito.com`.
-Deployment resolves the enabled owner's subject and changes no account or pool
-settings. The older guide's family pool does not contain that username.
+The owner `gopalcbala` remains in pool `ca-central-1_VwnNJYce8`; no user or
+pool-wide authentication settings change. The dedicated upstream client remains
+`4b7pjdn3vjsrb0rbadrarco4sl`. The deployment reads the owned edge stack output and
+automatically enables its code grant, allowed scopes and fixed `/auth/callback`.
+No host callback input is needed. On a fresh installation, the first revision is
+health-only until the edge exists and the callback is configured.
 
-An omitted callback on first deployment keeps OAuth disabled on the dedicated
-client. The container can be deployed safely, but this is not a functioning
-ChatGPT connection. Supply the actual callback displayed by the MCP host:
+Run the existing manual workflow on main:
 
 ```bash
-gh workflow run deploy.yml --repo gopalcb/markdown-mcp-service --ref main \
-  -f callback_url='https://ACTUAL-HOST-CALLBACK'
+gh workflow run deploy.yml --repo gopalcb/markdown-mcp-service --ref main
 ```
 
-An omitted callback on later runs preserves its deployed value. The client allows
-only authorization-code OAuth with `openid`, `email`, and `markdown-api/write`.
-The host must support the predefined public client, actual Cognito discovery,
-PKCE S256 and the exact CloudFront `/mcp/` resource audience. Existing tokens bound
-to the earlier Express URL are rejected; reconnect through the new public endpoint. Unsupported discovery capabilities are not
-fabricated. Complete email OTP privately; never provide tokens through job inputs,
-chat or source files.
+Configure the existing ChatGPT plugin for OAuth DCR, `markdown-api/write`, and
+`https://d3cjbof2ij7jy9.cloudfront.net/mcp/`. Remove the provided Cognito client ID
+from the host configuration. The adapter registers downstream clients and uses
+the Cognito client privately for upstream code exchange. Its authorization-server
+metadata is `/.well-known/oauth-authorization-server`; the issuer is the CloudFront
+origin plus `/`. Never replace Cognito's discovery with fabricated capabilities.
 
-Public HTTP checks do not verify host registration, PKCE/state, OTP, code exchange,
-refresh/revocation or real writes. Before real documents, complete those private
-checks and a harmless upload with READY index/S3 version/hash readback. Confirm
-same-name version history and do not blindly retry incomplete batches.
+The adapter maintains explicit consent and separate upstream/downstream PKCE.
+Follow the host-initiated authorization flow, approve service access and complete
+email sign-in privately. No password, OTP, tokens or signing key belongs in chat,
+source, job inputs or logs. Saved plugin configuration does not prove a login.
+
+State lives in retained `markdown-mcp-service-oauth`, encrypted by a generated key
+in retained `markdown-mcp-service-oauth-key`. Do not rotate/delete this key casually:
+existing sessions and encrypted registrations would become unreadable. Deployment
+artifacts contain only its ARN. Runtime retrieves it with the task role. The
+CloudFormation-only deployment-role GetSecretValue permission exists for resource
+handler stabilization, not ordinary CI reads. Cleanup of retained authentication
+resources requires separate inventory/authorization.
+
+Tests exercise signed synthetic Cognito tokens through real HTTP OAuth routes,
+restart persistence, replay/CSRF, refresh and revocation. Public smoke checks cover
+health, discovery, anonymous rejection and reaching real Cognito login. They do
+not prove private ChatGPT sign-in, OTP delivery or a real Markdown write. Complete
+private acceptance and a harmless upload with READY/version readback before using
+real documents; do not blindly retry incomplete uploads.
 
 ## Cost and cleanup
 
 One 0.25-vCPU, 0.5-GiB Fargate task runs continuously: 182.5 vCPU-hours and
 365 GiB-hours over 730 hours. Applicable CloudFront requests/data transfer,
-load-balancer, IPv4, ECR, logs, Cognito, S3 and DynamoDB charges are additional; deployments temporarily overlap tasks.
+load-balancer, IPv4, ECR, logs, Cognito, S3, on-demand OAuth DynamoDB state and Secrets Manager charges are additional; deployments temporarily overlap tasks.
 No NAT gateway or cluster is created. Consult current [Fargate rates](https://aws.amazon.com/fargate/pricing/)
 [CloudFront rates](https://aws.amazon.com/cloudfront/pricing/), and
 [load-balancer rates](https://aws.amazon.com/elasticloadbalancing/pricing/).

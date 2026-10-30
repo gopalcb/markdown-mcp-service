@@ -22,7 +22,12 @@ os.environ['MCP_ENABLED'] = 'false'
 app_module = importlib.import_module('app')
 from mcp_services.auth_service import verify_access_token
 from mcp_services.storage_service import save_batch
-from mcp_services.validation_service import UploadBatch, load_config, prepare_payload
+from mcp_services.validation_service import (
+    UploadBatch,
+    load_config,
+    prepare_payload,
+    valid_oauth_redirect,
+)
 from services.document_service import store_documents
 
 CONFIG = {
@@ -35,6 +40,9 @@ CONFIG = {
     'ALLOWED_SUB': 'owner',
     'S3_BUCKET': 'bucket',
     'USER_FILES_TABLE': 'index',
+    'COGNITO_DOMAIN': 'https://softrobots-usernames-249766001220.auth.ca-central-1.amazoncognito.com',
+    'OAUTH_STATE_TABLE': 'oauth',
+    'OAUTH_SECRET_ARN': 'arn:aws:secretsmanager:ca-central-1:249766001220:secret:fixture',
 }
 KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 JWKS = Mock()
@@ -387,3 +395,17 @@ def test_origin_hostname_config_rejects_urls_ports_and_arbitrary_hosts(monkeypat
             load_config()
     monkeypatch.setenv('MCP_ORIGIN_HOST', 'origin.ecs.ca-central-1.on.aws')
     assert load_config()['MCP_ORIGIN_HOST'] == 'origin.ecs.ca-central-1.on.aws'
+
+
+@pytest.mark.parametrize(
+    'redirect',
+    [
+        'http://localhost:8000@attacker.example/callback',
+        'https://chatgpt.com@attacker.example/connector/oauth/id',
+        'https://chatgpt.com/connector/oauth/id?next=https://attacker.example',
+        'https://chatgpt.com:444/connector/oauth/id',
+    ],
+)
+def test_oauth_redirect_rejects_ambiguous_origins(redirect: str) -> None:
+    """Do not let wildcard redirect patterns admit userinfo or attacker origins."""
+    assert not valid_oauth_redirect(redirect)

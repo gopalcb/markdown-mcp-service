@@ -1,0 +1,26 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "gb-markdown": {
+      "type": "streamable-http",
+      "url": "https://d3cjbof2ij7jy9.cloudfront.net/mcp/",
+      "extensions": {
+        "com.openai": {
+          "auth": {
+            "type": "oauth",
+            "client": {
+              "mode": "dcr"
+            },
+            "baseScopes": [
+              "markdown-api/write"
+            ],
+            "defaultScopes": [
+              "markdown-api/write"
+            ],
+            "oidcEnabled": false
+          }
+        }
+      }
+    }
+  }
+}

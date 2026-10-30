@@ -237,6 +237,50 @@ Resources:
               ForAnyValue:StringEquals:
                 aws:CalledVia:
                 - cloudformation.amazonaws.com
+          - Sid: ManageOnlyMcpOAuthState
+            Effect: Allow
+            Action:
+            - dynamodb:CreateTable
+            - dynamodb:UpdateTable
+            - dynamodb:DeleteTable
+            - dynamodb:DescribeTable
+            - dynamodb:UpdateTimeToLive
+            - dynamodb:DescribeTimeToLive
+            - dynamodb:TagResource
+            - dynamodb:UntagResource
+            - dynamodb:ListTagsOfResource
+            - dynamodb:DescribeContinuousBackups
+            - dynamodb:DescribeContributorInsights
+            - dynamodb:DescribeKinesisStreamingDestination
+            - dynamodb:GetResourcePolicy
+            Resource: arn:aws:dynamodb:ca-central-1:249766001220:table/markdown-mcp-service-oauth
+          - Sid: ManageOnlyMcpOAuthKey
+            Effect: Allow
+            Action:
+            - secretsmanager:CreateSecret
+            - secretsmanager:UpdateSecret
+            - secretsmanager:DeleteSecret
+            - secretsmanager:RestoreSecret
+            - secretsmanager:DescribeSecret
+            - secretsmanager:TagResource
+            - secretsmanager:UntagResource
+            - secretsmanager:PutSecretValue
+            Resource: arn:aws:secretsmanager:ca-central-1:249766001220:secret:markdown-mcp-service-oauth-key-??????
+          - Sid: GenerateMcpOAuthKey
+            Effect: Allow
+            Action: secretsmanager:GetRandomPassword
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: ca-central-1
+          - Sid: ReadMcpOAuthKeyOnlyThroughCloudFormation
+            Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource: arn:aws:secretsmanager:ca-central-1:249766001220:secret:markdown-mcp-service-oauth-key-??????
+            Condition:
+              ForAnyValue:StringEquals:
+                aws:CalledVia:
+                - cloudformation.amazonaws.com
       Tags:
       - Key: Project
         Value: markdown-mcp-service

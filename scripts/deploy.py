@@ -2,7 +2,8 @@
 
 CloudFormation owns its image repository, task roles and dedicated OAuth client.
 ECS Express owns HTTPS ingress. A health-only first revision obtains its hostname
-before the enabled revision binds the exact OAuth audience. No credentials persist.
+before the enabled revision binds the exact OAuth audience. OAuth state and key
+material persist only in the owned table and secret, never deployment artifacts.
 """
 
 import argparse
@@ -28,6 +29,8 @@ CLUSTER = 'softrobots-systems'
 POOL = 'ca-central-1_VwnNJYce8'
 BUCKET = f'agent-work-history--{ACCOUNT}-{REGION}'
 TABLE = 'softrobots-document-api-user-files'
+COGNITO_DOMAIN = f'https://softrobots-usernames-{ACCOUNT}.auth.{REGION}.amazoncognito.com'
+EDGE_STACK = 'markdown-mcp-service-edge'
 SERVICE_ARN = f'arn:aws:ecs:{REGION}:{ACCOUNT}:service/{CLUSTER}/{SERVICE}'
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -85,18 +88,24 @@ def verify_existing_cluster(session) -> None:
         raise ValueError('The existing cluster must be ACTIVE in the expected account and region')
 
 
-def provision(session, callback: str | None) -> dict:
-    """Apply the dedicated stack using the independent GitHub role and existing ECS cluster."""
-    if callback is not None and callback and not re.fullmatch(r'https://[^\s#]+', callback):
-        raise ValueError('Callback must be the exact HTTPS callback displayed by the MCP host')
+def provision(session) -> dict:
+    """Apply owned resources and derive the fixed Cognito callback from the edge stack."""
     verify_existing_cluster(session)
     client = session.client('cloudformation')
     state = stack_state(client)
-    parameters = []
-    if callback is not None:
-        parameters.append({'ParameterKey': 'CallbackUrl', 'ParameterValue': callback})
-    elif state:
-        parameters.append({'ParameterKey': 'CallbackUrl', 'UsePreviousValue': True})
+    if state and state['StackStatus'].endswith('_IN_PROGRESS'):
+        raise RuntimeError('Existing infrastructure operation must finish before deployment')
+    edge = stack_state(client, EDGE_STACK)
+    callback = ''
+    if edge:
+        if edge['StackStatus'] not in {'CREATE_COMPLETE', 'UPDATE_COMPLETE'}:
+            raise RuntimeError('Owned CloudFront stack must be complete before OAuth provisioning')
+        outputs = {item['OutputKey']: item['OutputValue'] for item in edge['Outputs']}
+        base = outputs['PublicBaseUrl']
+        if not re.fullmatch(r'https://[a-z0-9]+\.cloudfront\.net', base):
+            raise ValueError('Owned edge output must be an exact HTTPS CloudFront origin')
+        callback = base + '/auth/callback'
+    parameters = [{'ParameterKey': 'CallbackUrl', 'ParameterValue': callback}]
     request = {
         'StackName': STACK,
         'TemplateBody': (ROOT / 'aws-infrastructure/template.yaml').read_text(),
@@ -104,8 +113,6 @@ def provision(session, callback: str | None) -> dict:
         'Parameters': parameters,
         'Tags': [{'Key': 'Project', 'Value': CLUSTER}],
     }
-    if state and state['StackStatus'].endswith('_IN_PROGRESS'):
-        raise RuntimeError('Existing infrastructure operation must finish before deployment')
     try:
         if state:
             client.update_stack(**request)
@@ -127,7 +134,7 @@ def provision_edge(session, origin: str) -> dict:
         or not re.fullmatch(r'[a-z0-9-]+\.ecs\.ca-central-1\.on\.aws', hostname)
     ):
         raise ValueError('Expected the exact regional ECS HTTPS origin')
-    stack_name = 'markdown-mcp-service-edge'
+    stack_name = EDGE_STACK
     client = session.client('cloudformation')
     state = stack_state(client, stack_name)
     if state and state['StackStatus'].endswith('_IN_PROGRESS'):
@@ -290,15 +297,30 @@ def wait_service(ecs, container: dict) -> dict:
 
 
 def verify_endpoint(base: str) -> None:
-    """Make one final bounded health, metadata and anonymous-denial check."""
+    """Check public health, real S256 discovery, resource binding and anonymous denial once."""
     context = ssl.create_default_context(cafile=get_cert_path(True))
-    for path in ('/health', '/.well-known/oauth-protected-resource/mcp'):
+    for path in (
+        '/health',
+        '/.well-known/oauth-protected-resource/mcp',
+        '/.well-known/oauth-authorization-server',
+    ):
         with urllib.request.urlopen(base + path, timeout=20, context=context) as response:
             payload = json.load(response)
         if path == '/health' and payload.get('status') != 'ok':
             raise ValueError('Unexpected MCP health response')
-        if path != '/health' and payload.get('resource') != base + '/mcp/':
-            raise ValueError('Published MCP resource does not match its actual endpoint')
+        if path == '/.well-known/oauth-protected-resource/mcp' and (
+            payload.get('resource') != base + '/mcp/'
+            or payload.get('authorization_servers') != [base + '/']
+        ):
+            raise ValueError('Published MCP resource or authorization server does not match')
+        if path == '/.well-known/oauth-authorization-server' and (
+            payload.get('issuer') != base + '/'
+            or 'S256' not in payload.get('code_challenge_methods_supported', [])
+            or payload.get('registration_endpoint') != base + '/register'
+            or payload.get('authorization_endpoint') != base + '/authorize'
+            or payload.get('token_endpoint') != base + '/token'
+        ):
+            raise ValueError('Published OAuth discovery lacks the expected S256 adapter endpoints')
     try:
         urllib.request.urlopen(base + '/mcp/', timeout=20, context=context).close()
     except HTTPError as error:
@@ -345,12 +367,21 @@ def deploy(session, image: str, outputs: dict) -> dict:
         if enabled:
             edge = provision_edge(session, origin)
             base = edge['PublicBaseUrl']
+            if outputs['OAuthConfigured'] != 'true':
+                # On a first installation the edge did not exist during provision.
+                # Enable the fixed upstream callback before activating the adapter.
+                outputs = provision(session)
+            if outputs['OAuthConfigured'] != 'true':
+                raise ValueError('Owned OAuth callback must be configured before activation')
         environment = {
             'AWS_DEFAULT_REGION': REGION,
             'MCP_ENABLED': str(enabled).lower(),
             'PUBLIC_BASE_URL': base,
             'COGNITO_ISSUER': f'https://cognito-idp.{REGION}.amazonaws.com/{POOL}',
             'COGNITO_CLIENT_ID': outputs['ClientId'],
+            'COGNITO_DOMAIN': COGNITO_DOMAIN,
+            'OAUTH_STATE_TABLE': outputs['OAuthStateTable'],
+            'OAUTH_SECRET_ARN': outputs['OAuthSecretArn'],
             'MCP_RESOURCE': base + '/mcp/',
             'MCP_ORIGIN_HOST': urlsplit(origin).hostname,
             'MCP_WRITE_SCOPE': 'markdown-api/write',
@@ -405,14 +436,13 @@ def main() -> None:
     """Run one guarded infrastructure or container stage and save nonsecret output."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['provision', 'deploy'])
-    parser.add_argument('--callback')
     parser.add_argument('--image')
     parser.add_argument('--outputs', default='/tmp/markdown-mcp-stack.json')
     parser.add_argument('--result', default='/tmp/markdown-mcp-deployment.json')
     args = parser.parse_args()
     session = github_session()
     if args.action == 'provision':
-        result = provision(session, args.callback)
+        result = provision(session)
         Path(args.outputs).write_text(json.dumps(result, indent=2) + '\n')
     else:
         if not args.image:
