@@ -20,6 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ['MCP_ENABLED'] = 'false'
 app_module = importlib.import_module('app')
+from test_storage_contract import storage_doubles
+
 from mcp_services.auth_service import verify_access_token
 from mcp_services.storage_service import save_batch
 from mcp_services.validation_service import (
@@ -187,7 +189,8 @@ def test_sdk_and_upload(monkeypatch, status: str) -> None:
         assert result.status_code == 200
         assert not result.json()['result'].get('isError')
         assert result.json()['result']['structuredContent'] == {
-            'success': status == 'READY', 'files': receipts,
+            'success': status == 'READY',
+            'files': receipts,
         }
         assert writer.call_args.args[0]['username'] == 'gopalcbala'
 
@@ -226,29 +229,18 @@ def test_bounded_body_and_rate_limit() -> None:
         assert 429 in responses
 
 
-def test_versioned_storage_and_uncertainty() -> None:
-    """Reuse actual S3/index coordinator; publish READY only after version acknowledgment."""
+def test_latest_storage_and_uncertainty() -> None:
+    """Publish unversioned READY receipts only after S3 and compact index acknowledgements."""
     payload = prepare_payload(UploadBatch(files=[{'name': 'x.md', 'content': '# fixture'}]))
-    s3, table = Mock(), Mock()
-    s3.put_object.return_value = {'VersionId': 'version-1'}
-    assert store_documents(payload, s3, table, 'bucket', 'request')[0]['status'] == 'READY'
-    assert (
-        s3.put_object.call_args.kwargs['Key']
-        == 'agent-work/raw-markdown/gopalcbala/learning-chatgpt/x.md'
-    )
-    assert (
-        table.update_item.call_args.kwargs['ExpressionAttributeValues'][':version'] == 'version-1'
-    )
+    s3, table, objects, rows = storage_doubles()
+    first = store_documents(payload, s3, table, 'bucket', 'request')[0]
+    assert first['status'] == 'READY'
+    assert first['s3_key'] == 'agent-work/raw-markdown/gopalcbala/learning-chatgpt/x.md'
+    assert 's3_version_id' not in rows[first['file_id']]
 
     table.reset_mock()
     s3.put_object.side_effect = ClientError({'Error': {'Code': 'AccessDenied'}}, 'PutObject')
     assert store_documents(payload, s3, table, 'bucket', 'request')[0]['status'] == 'INCOMPLETE'
-
-    table.update_item.assert_not_called()
-    s3.put_object.side_effect = None
-    s3.put_object.return_value = {}
-    assert store_documents(payload, s3, table, 'bucket', 'request')[0]['status'] == 'INCOMPLETE'
-
     table.update_item.assert_not_called()
 
 
@@ -296,9 +288,10 @@ def test_partial_and_timeout_results(monkeypatch) -> None:
     payload = UploadBatch(
         files=[{'name': 'a.md', 'content': 'a'}, {'name': 'b.md', 'content': 'b'}]
     )
-    s3, table = Mock(), Mock()
+    s3, table, objects, rows = storage_doubles()
+    # The first acknowledged write remains independent of the second request timeout.
     s3.put_object.side_effect = [
-        {'VersionId': 'first-version'},
+        {},
         ReadTimeoutError(endpoint_url='https://s3.invalid'),
     ]
     results = store_documents(prepare_payload(payload), s3, table, 'bucket', 'request')

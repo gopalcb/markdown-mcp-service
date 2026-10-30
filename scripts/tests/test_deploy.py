@@ -444,3 +444,81 @@ def test_edge_keeps_mcp_uncached_and_preserves_authorization_transport() -> None
     assert all(item['ErrorCachingMinTTL'] == 0 for item in distribution['CustomErrorResponses'])
     assert 'Logging' not in distribution
     assert set(template['Resources']) == {'Distribution'}
+
+
+def test_compact_storage_reads_remain_owner_scoped():
+    """Conditional overwrite reads add no bucket listing or cross-owner table access."""
+    loader = type('TemplateLoader', (yaml.SafeLoader,), {})
+    loader.add_multi_constructor('!', lambda *_: None)
+    template = yaml.load(
+        (deploy.ROOT / 'aws-infrastructure/template.yaml').read_text(), Loader=loader
+    )
+    policies = template['Resources']['TaskRole']['Properties']['Policies']
+    statements = [
+        statement for policy in policies for statement in policy['PolicyDocument']['Statement']
+    ]
+    storage = [
+        statement
+        for statement in statements
+        if statement['Effect'] == 'Allow'
+        and 'agent-work-history--' in str(statement.get('Resource'))
+    ]
+    assert len(storage) == 1
+    assert set(storage[0]['Action']) == {'s3:GetObject', 's3:PutObject'}
+    assert (
+        storage[0]['Resource']
+        == f'arn:aws:s3:::{deploy.BUCKET}/agent-work/raw-markdown/gopalcbala/*'
+    )
+    index = next(
+        statement
+        for statement in statements
+        if 'softrobots-document-api-user-files' in str(statement.get('Resource'))
+    )
+    assert set(index['Action']) == {'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem'}
+    assert index['Condition']['ForAllValues:StringEquals']['dynamodb:LeadingKeys'] == ['gopalcbala']
+
+
+def test_storage_preflight_does_not_require_versioning():
+    """Suspension must not block deployment while encryption, TLS and owner checks remain."""
+    session = Mock()
+    client = session.client.return_value
+    client.get_bucket_encryption.return_value = {
+        'ServerSideEncryptionConfiguration': {
+            'Rules': [{'ApplyServerSideEncryptionByDefault': {'SSEAlgorithm': 'AES256'}}]
+        }
+    }
+    client.get_public_access_block.return_value = {
+        'PublicAccessBlockConfiguration': {
+            key: True
+            for key in (
+                'BlockPublicAcls',
+                'IgnorePublicAcls',
+                'BlockPublicPolicy',
+                'RestrictPublicBuckets',
+            )
+        }
+    }
+    client.get_bucket_policy.return_value = {
+        'Policy': json.dumps(
+            {
+                'Statement': [
+                    {
+                        'Effect': 'Deny',
+                        'Principal': '*',
+                        'Action': 's3:*',
+                        'Condition': {'Bool': {'aws:SecureTransport': 'false'}},
+                        'Resource': [f'arn:aws:s3:::{deploy.BUCKET}/*'],
+                    }
+                ]
+            }
+        )
+    }
+    client.admin_get_user.return_value = {
+        'Username': 'gopalcbala',
+        'Enabled': True,
+        'UserAttributes': [{'Name': 'sub', 'Value': 'verified-sub'}],
+    }
+    assert deploy.verify_storage_and_owner(session) == 'verified-sub'
+    client.get_bucket_versioning.assert_not_called()
+    client.get_bucket_encryption.assert_called_once_with(Bucket=deploy.BUCKET)
+    client.get_public_access_block.assert_called_once_with(Bucket=deploy.BUCKET)
