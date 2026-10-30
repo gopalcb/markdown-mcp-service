@@ -1,0 +1,217 @@
+project: markdown-mcp-service
+files:
+  app.py:
+    purpose: Expose the authenticated stateless Markdown MCP server and public discovery
+      routes.
+    functions:
+      ProtocolLogFilter.filter:
+        summary: Replace library diagnostic strings and tracebacks with a safe event
+          category.
+      configure_protocol_logging:
+        summary: Use a sanitized handler for protocol-library errors; storage logs
+          are separate.
+      create_app:
+        summary: Construct isolated SDK lifecycle and dependencies for production
+          or fixture tests.
+      create_app.save_markdown:
+        summary: Save Markdown to Work Organizer. Same group/name creates a new S3
+          version; partial batches are not atomic. Do not retry unverified files blindly.
+      create_app.lifespan:
+        summary: Run the SDK session manager for the lifetime of the ASGI worker.
+      create_app.health:
+        summary: Expose container liveness without cloud calls or credentials.
+      create_app.protected_resource:
+        summary: Advertise only actual configured resource and Cognito authorization
+          server.
+  mcp_services/__init__.py:
+    purpose: Authentication, validation and storage adapters for the Markdown MCP
+      boundary.
+    functions: {}
+  mcp_services/auth_service.py:
+    purpose: Fail-closed Cognito verification and bounded ASGI ingress without credential
+      logging.
+    functions:
+      verify_access_token:
+        summary: Verify signature and exact resource/client binding before subject
+          authorization.
+      IngressMiddleware.__init__:
+        summary: Keep a bounded global token bucket and injected token verifier.
+      IngressMiddleware.__call__:
+        summary: Authenticate once and replay only a fully bounded request to the
+          SDK.
+      IngressMiddleware.__call__.bounded_receive:
+        summary: Deliver the checked bytes once, preserving subsequent disconnect
+          events.
+  mcp_services/storage_service.py:
+    purpose: Adapt validated MCP input to the exact production document storage service.
+    functions:
+      write_documents:
+        summary: Use task-role credentials and no automatic write retries; always
+          close clients.
+      save_batch:
+        summary: Report saved versus uncertain outcomes only after the shared READY
+          transition.
+  mcp_services/validation_service.py:
+    purpose: Validate deployment settings and whole Markdown batches before storage.
+    functions:
+      Metadata.validate_path:
+        summary: Accept only safe slash-separated segments.
+      prepare_payload:
+        summary: Validate every byte and destination before producing the shared storage
+          contract.
+      load_config:
+        summary: Fail startup for incomplete enabled configurations; permit deny-all
+          bootstrap.
+  scripts/deploy.py:
+    purpose: 'Provision and deploy only Markdown MCP through the main-branch GitHub
+      role.
+
+
+      CloudFormation owns its image repository, task roles and dedicated OAuth client.
+
+      ECS Express owns HTTPS ingress. A health-only first revision obtains its hostname
+
+      before the enabled revision binds the exact OAuth audience. No credentials persist.'
+    functions:
+      github_session:
+        summary: Reject local mutation and unrelated repository, account, branch or
+          identity.
+      stack_state:
+        summary: Read the exact stack, accepting absence only for its explicit missing
+          error.
+      wait_stack:
+        summary: Read completion every two minutes; fail on rollback without retrying
+          writes.
+      verify_existing_cluster:
+        summary: Require the existing cluster and never create a replacement cluster.
+      provision:
+        summary: Apply the dedicated stack using the independent GitHub role and existing
+          ECS cluster.
+      verify_storage_and_owner:
+        summary: Check required existing storage protections and resolve only gopalcbala's
+          subject.
+      public_subnets:
+        summary: Select default public subnets with verified internet routes in two
+          zones.
+      service_state:
+        summary: Read only the owned Express service, preserving real access failures.
+      service_url:
+        summary: Extract the HTTPS hostname provided by Express without guessing its
+          format.
+      wait_service:
+        summary: Require the matching image/environment revision's successful deployment.
+      verify_endpoint:
+        summary: Make one final bounded health, metadata and anonymous-denial check.
+      deploy:
+        summary: Create a health-only bootstrap if needed, then deploy the bound MCP
+          resource.
+      main:
+        summary: Run one guarded infrastructure or container stage and save nonsecret
+          output.
+  scripts/tests/test_deploy.py:
+    purpose: Check deployment guards, additive stack parameters and exact rollout
+      matching.
+    functions:
+      test_local_deployment_is_rejected:
+        summary: A valid AWS identity alone must never enable local infrastructure
+          writes.
+      test_provision_preserves_existing_callback_and_uses_caller_role:
+        summary: The additive prerequisite grant is sufficient without a new provisioner
+          role.
+      test_provision_refuses_concurrent_infrastructure_change:
+        summary: Do not issue another update while the owned stack is changing.
+      test_invalid_callback_rejected_before_aws_write:
+        summary: A callback cannot be an insecure or fragment-bearing guessed address.
+      test_rollout_requires_successful_exact_environment:
+        summary: A prior health-only revision with the same image cannot pass activation.
+      test_deploy_requires_dedicated_immutable_image:
+        summary: Tags or another service's digest cannot become this service's revision.
+      test_missing_cluster_fails_before_any_creation:
+        summary: The standalone project must never create a cluster when the existing
+          one is missing.
+      test_delivery_role_policy_is_complete_and_has_no_self_management:
+        summary: Independent delivery owns only its service and cannot create clusters
+          or edit its identity.
+      test_independent_repository_identity_is_required:
+        summary: Old Softrobots identity or another repository cannot deploy this
+          standalone service.
+  services/__init__.py:
+    purpose: Document validation, storage, indexing and operational logging services.
+    functions: {}
+  services/document_service.py:
+    purpose: Coordinate independent uploads across S3 and the user-files index.
+    functions:
+      store_documents:
+        summary: Return per-file outcomes; leave interrupted records PENDING for reconciliation.
+  services/dynamodb_service.py:
+    purpose: Maintain one upload record keyed by username and file ID.
+    functions:
+      create_file_record:
+        summary: Record intent before writing objects so interrupted uploads can be
+          inspected.
+      mark_file_ready:
+        summary: Publish readiness only after the S3 object has been acknowledged.
+  services/logging_service.py:
+    purpose: Emit structured operational events without document bodies or metadata.
+    functions:
+      log_event:
+        summary: Write only identifiers and safe error types to Lambda's CloudWatch
+          stream.
+  services/s3_service.py:
+    purpose: Write one versioned private Markdown object in its user and category
+      partition.
+    functions:
+      store_document:
+        summary: Persist the object; propagate errors so the index is never marked
+          ready early.
+  tests/test_mcp.py:
+    purpose: Exercise signed JWT boundaries, real SDK transport and production storage
+      contracts.
+    functions:
+      claims:
+        summary: Produce a valid short-lived fixture access token payload.
+      verify:
+        summary: Use fixture keys while running the production JWT validation code.
+      headers:
+        summary: Sign real fixture JWTs, including intentionally invalid claims.
+      test_reject_claims:
+        summary: Reject each independent authorization failure before MCP dispatch.
+      test_signature_and_discovery:
+        summary: Expose discovery but reject missing, malformed and wrongly signed
+          tokens.
+      test_sdk_and_upload:
+        summary: Initialize real SDK, discover tool schema and invoke its validated
+          storage adapter.
+      test_invalid_batch:
+        summary: Reject invalid batch destinations and UTF-8 sizes before storage.
+      test_bounded_body_and_rate_limit:
+        summary: Enforce byte limit without trusting Content-Length, then bound request
+          rate.
+      test_versioned_storage_and_uncertainty:
+        summary: Reuse actual S3/index coordinator; publish READY only after version
+          acknowledgment.
+      test_bootstrap_and_config:
+        summary: Deny all MCP/discovery during bootstrap and reject resource slash
+          mismatches.
+      test_protocol_logs_are_sanitized:
+        summary: Ensure even library exception messages cannot write caller content
+          to logs.
+      test_partial_and_timeout_results:
+        summary: Preserve partial uncertainty and do not claim success when a timeout
+          follows a save.
+      test_sdk_host_and_origin_restrictions:
+        summary: Reject DNS-rebinding hosts and unapproved browser origins before
+          tool execution.
+      test_storage_errors_do_not_expose_aws_details:
+        summary: Sanitize errors outside the shared per-file coordinator as uncertain
+          failures.
+  tests/test_storage_contract.py:
+    purpose: Protect the independent source snapshot and version-pinned overwrite
+      contract.
+    functions:
+      test_storage_snapshot_matches_provenance:
+        summary: Fail when vendored shared logic changes without an explicit provenance
+          review.
+      test_same_name_keeps_key_and_pins_distinct_versions:
+        summary: Repeated saves retain separate file receipts while intentionally
+          versioning one key.

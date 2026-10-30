@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/gopalcb/gb-systems-and-agents",
+  "commit": "06967a81915a21dc48fa102f8771dbd9a73b195a",
+  "path": "work-organizer-portal/aws-infrastructure/document-api/src/services",
+  "sha256": {
+    "s3_service.py": "720bda180790f1128f595f8086a180ab1bff6629645bb18b7b963a91fd6e6d7b",
+    "document_service.py": "4eca3d7c9f13936febdb698c51aded2e921ce02c99470e3703275a33e0b39b02",
+    "logging_service.py": "f587561ac1c74eb0ba897e587fe8c98e62b47046d4aa5cf8c9ad2b3177dd503b",
+    "__init__.py": "8b65bd9cd40b5e68c4941ce537fa1866c53418b887cbdb4cdfcdf7b481b2a7dc",
+    "dynamodb_service.py": "7ea65c691f083580082e23f025afdfdea2d96e90e3c1de3f65b66669ecdec9d8"
+  }
+}

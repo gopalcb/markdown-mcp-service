@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Dedicated Markdown MCP image, task identities and Cognito client; existing storage and users are unchanged.
+Parameters:
+  CallbackUrl:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|https://[^\s#]+$'
+    Description: Exact callback displayed by the real MCP host; empty keeps OAuth disabled.
+Conditions:
+  EnableOAuth: !Not [!Equals [!Ref CallbackUrl, '']]
+Resources:
+  Repository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: markdown-mcp-service
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration: {ScanOnPush: true}
+  Logs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /markdown-mcp-service
+      RetentionInDays: 7
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: markdown-mcp-service-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: WriteOwnerMarkdownAndIndex
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: arn:aws:s3:::agent-work-history--249766001220-ca-central-1/agent-work/raw-markdown/gopalcbala/*
+              - Effect: Allow
+                Action: [dynamodb:PutItem, dynamodb:UpdateItem]
+                Resource: arn:aws:dynamodb:ca-central-1:249766001220:table/softrobots-document-api-user-files
+                Condition:
+                  ForAllValues:StringEquals:
+                    dynamodb:LeadingKeys: [gopalcbala]
+              - Effect: Deny
+                Action: [s3:DeleteObject, s3:DeleteObjectVersion]
+                Resource: arn:aws:s3:::agent-work-history--249766001220-ca-central-1/*
+  ExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: markdown-mcp-service-execution-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: ecs-tasks.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PullMcpImageAndWriteLogs
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Effect: Allow
+                Action: [ecr:BatchCheckLayerAvailability, ecr:GetDownloadUrlForLayer, ecr:BatchGetImage]
+                Resource: !GetAtt Repository.Arn
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt Logs.Arn
+  ResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      UserPoolId: ca-central-1_VwnNJYce8
+      Identifier: markdown-api
+      Name: Personal Markdown MCP
+      Scopes:
+        - ScopeName: write
+          ScopeDescription: Save Markdown for the configured owner
+  Client:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: ResourceServer
+    Properties:
+      UserPoolId: ca-central-1_VwnNJYce8
+      ClientName: markdown-mcp-service
+      GenerateSecret: false
+      EnableTokenRevocation: true
+      PreventUserExistenceErrors: ENABLED
+      ExplicitAuthFlows: [ALLOW_REFRESH_TOKEN_AUTH]
+      AllowedOAuthFlowsUserPoolClient: !If [EnableOAuth, true, false]
+      AllowedOAuthFlows: !If [EnableOAuth, [code], !Ref AWS::NoValue]
+      AllowedOAuthScopes: !If [EnableOAuth, [openid, email, markdown-api/write], !Ref AWS::NoValue]
+      CallbackURLs: !If [EnableOAuth, [!Ref CallbackUrl], !Ref AWS::NoValue]
+      SupportedIdentityProviders: [COGNITO]
+      AccessTokenValidity: 5
+      IdTokenValidity: 5
+      RefreshTokenValidity: 90
+      TokenValidityUnits: {AccessToken: minutes, IdToken: minutes, RefreshToken: days}
+  Branding:
+    Type: AWS::Cognito::ManagedLoginBranding
+    Properties:
+      UserPoolId: ca-central-1_VwnNJYce8
+      ClientId: !Ref Client
+      UseCognitoProvidedValues: true
+Outputs:
+  ClientId:
+    Value: !Ref Client
+  RepositoryUri:
+    Value: !GetAtt Repository.RepositoryUri
+  TaskRoleArn:
+    Value: !GetAtt TaskRole.Arn
+  ExecutionRoleArn:
+    Value: !GetAtt ExecutionRole.Arn
+  OAuthConfigured:
+    Value: !If [EnableOAuth, 'true', 'false']

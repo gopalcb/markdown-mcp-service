@@ -1,0 +1,233 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ManageDedicatedMcpStack",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:CreateStack",
+        "cloudformation:UpdateStack",
+        "cloudformation:DeleteStack"
+      ],
+      "Resource": "arn:aws:cloudformation:ca-central-1:249766001220:stack/markdown-mcp-service/*"
+    },
+    {
+      "Sid": "ReadMcpStack",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:DescribeStacks",
+        "cloudformation:DescribeStackEvents"
+      ],
+      "Resource": "arn:aws:cloudformation:ca-central-1:249766001220:stack/markdown-mcp-service/*"
+    },
+    {
+      "Sid": "PassMcpRuntimeRoles",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": [
+        "arn:aws:iam::249766001220:role/markdown-mcp-service-task-role",
+        "arn:aws:iam::249766001220:role/markdown-mcp-service-execution-role",
+        "arn:aws:iam::249766001220:role/softrobots-ecs-infrastructure-role"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": [
+            "ecs.amazonaws.com",
+            "ecs-tasks.amazonaws.com"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "PublishMcpImages",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:DescribeImages",
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:InitiateLayerUpload",
+        "ecr:UploadLayerPart",
+        "ecr:CompleteLayerUpload",
+        "ecr:PutImage",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer"
+      ],
+      "Resource": "arn:aws:ecr:ca-central-1:249766001220:repository/markdown-mcp-service"
+    },
+    {
+      "Sid": "TagMcpTasks",
+      "Effect": "Allow",
+      "Action": "ecs:TagResource",
+      "Resource": "arn:aws:ecs:ca-central-1:249766001220:task-definition/markdown-mcp-service*:*"
+    },
+    {
+      "Sid": "ReadOwnerIdentity",
+      "Effect": "Allow",
+      "Action": "cognito-idp:AdminGetUser",
+      "Resource": "arn:aws:cognito-idp:ca-central-1:249766001220:userpool/ca-central-1_VwnNJYce8"
+    },
+    {
+      "Sid": "VerifyExistingStorage",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketVersioning",
+        "s3:GetEncryptionConfiguration",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:GetBucketPolicy"
+      ],
+      "Resource": "arn:aws:s3:::agent-work-history--249766001220-ca-central-1"
+    },
+    {
+      "Sid": "ManageOnlyMcpRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:GetRole",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:DeleteRole",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:ListRoleTags",
+        "iam:ListRolePolicies",
+        "iam:GetRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:ListAttachedRolePolicies"
+      ],
+      "Resource": [
+        "arn:aws:iam::249766001220:role/markdown-mcp-service-task-role",
+        "arn:aws:iam::249766001220:role/markdown-mcp-service-execution-role"
+      ]
+    },
+    {
+      "Sid": "ManageOnlyMcpRepository",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:CreateRepository",
+        "ecr:DescribeRepositories",
+        "ecr:PutImageTagMutability",
+        "ecr:PutImageScanningConfiguration",
+        "ecr:TagResource",
+        "ecr:UntagResource",
+        "ecr:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:ecr:ca-central-1:249766001220:repository/markdown-mcp-service"
+    },
+    {
+      "Sid": "ManageOnlyMcpLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:PutRetentionPolicy",
+        "logs:DeleteRetentionPolicy",
+        "logs:TagResource",
+        "logs:UntagResource",
+        "logs:ListTagsForResource"
+      ],
+      "Resource": [
+        "arn:aws:logs:ca-central-1:249766001220:log-group:/markdown-mcp-service",
+        "arn:aws:logs:ca-central-1:249766001220:log-group:/markdown-mcp-service:*"
+      ]
+    },
+    {
+      "Sid": "DescribeLogs",
+      "Effect": "Allow",
+      "Action": "logs:DescribeLogGroups",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ca-central-1"
+        }
+      }
+    },
+    {
+      "Sid": "ManageMcpCognitoResources",
+      "Effect": "Allow",
+      "Action": [
+        "cognito-idp:CreateUserPoolClient",
+        "cognito-idp:DescribeUserPoolClient",
+        "cognito-idp:UpdateUserPoolClient",
+        "cognito-idp:DeleteUserPoolClient",
+        "cognito-idp:CreateResourceServer",
+        "cognito-idp:DescribeResourceServer",
+        "cognito-idp:UpdateResourceServer",
+        "cognito-idp:DeleteResourceServer",
+        "cognito-idp:CreateManagedLoginBranding",
+        "cognito-idp:DescribeManagedLoginBranding",
+        "cognito-idp:UpdateManagedLoginBranding",
+        "cognito-idp:DeleteManagedLoginBranding"
+      ],
+      "Resource": "arn:aws:cognito-idp:ca-central-1:249766001220:userpool/ca-central-1_VwnNJYce8"
+    },
+    {
+      "Sid": "ReadNetworkAndAuthenticateRegistry",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:GetAuthorizationToken",
+        "ec2:DescribeVpcs",
+        "ec2:DescribeSubnets",
+        "ec2:DescribeRouteTables"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ca-central-1"
+        }
+      }
+    },
+    {
+      "Sid": "RequireExistingCluster",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeClusters",
+      "Resource": "arn:aws:ecs:ca-central-1:249766001220:cluster/softrobots-systems"
+    },
+    {
+      "Sid": "ManageOnlyMcpService",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:CreateExpressGatewayService",
+        "ecs:UpdateExpressGatewayService",
+        "ecs:DescribeExpressGatewayService",
+        "ecs:DeleteExpressGatewayService",
+        "ecs:DescribeServices",
+        "ecs:ListServiceDeployments",
+        "ecs:TagResource"
+      ],
+      "Resource": "arn:aws:ecs:ca-central-1:249766001220:service/softrobots-systems/markdown-mcp-service"
+    },
+    {
+      "Sid": "RegisterMcpTaskRevisions",
+      "Effect": "Allow",
+      "Action": "ecs:RegisterTaskDefinition",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ca-central-1"
+        }
+      }
+    },
+    {
+      "Sid": "ManageExpressGateway",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:CreateGateway",
+        "ecs:TagResource"
+      ],
+      "Resource": "arn:aws:ecs:ca-central-1:249766001220:gateway/*"
+    },
+    {
+      "Sid": "AssociateOnlyExistingCluster",
+      "Effect": "Allow",
+      "Action": "ecs:AssociateGatewayWithCluster",
+      "Resource": [
+        "arn:aws:ecs:ca-central-1:249766001220:cluster/softrobots-systems",
+        "arn:aws:ecs:ca-central-1:249766001220:gateway/*"
+      ],
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:ca-central-1:249766001220:cluster/softrobots-systems"
+        }
+      }
+    }
+  ]
+}
