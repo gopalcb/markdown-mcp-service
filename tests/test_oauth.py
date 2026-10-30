@@ -163,6 +163,8 @@ def begin_consent(client: TestClient, registration: dict) -> tuple[str, dict]:
     consent_url = response.headers['location']
     page = client.get(consent_url)
     assert page.status_code == 200
+    assert page.headers['referrer-policy'] == 'strict-origin'
+    assert page.headers['cache-control'] == 'no-store'
     fields = dict(re.findall(r'name="(txn_id|csrf_token)" value="([^"]+)"', page.text))
     assert set(fields) == {'txn_id', 'csrf_token'}
     return consent_url, fields
@@ -172,8 +174,12 @@ def authorize(client: TestClient, registration: dict) -> tuple[str, dict]:
     """Approve real consent and emulate the upstream browser callback with cookies intact."""
     _, fields = begin_consent(client, registration)
     approved = client.post(
-        '/consent', data=fields | {'action': 'approve', 'submit': 'true'}, follow_redirects=False
+        '/consent',
+        data=fields | {'action': 'approve', 'submit': 'true'},
+        headers={'Origin': CONFIG['PUBLIC_BASE_URL']},
+        follow_redirects=False,
     )
+    assert approved.headers['referrer-policy'] == 'no-referrer'
     assert approved.status_code == 302
     upstream_url = urlsplit(approved.headers['location'])
     assert upstream_url.scheme + '://' + upstream_url.netloc == CONFIG['COGNITO_DOMAIN']
@@ -504,6 +510,31 @@ def test_oauth_ingress_bounds_host_origin_and_private_response_headers(oauth_set
         for response in (registered, client.get('/consent?txn_id=missing')):
             assert response.headers['cache-control'] == 'no-store'
             assert response.headers['referrer-policy'] == 'no-referrer'
+
+
+@pytest.mark.parametrize('origin', ['null', 'https://attacker.example', 'https://chatgpt.com'])
+def test_consent_origin_rejection_preserves_valid_transaction(oauth_setup, origin: str) -> None:
+    """Reject foreign or opaque consent even with valid CSRF; allow the real page origin."""
+    with TestClient(
+        app_module.create_app(CONFIG, oauth=oauth_setup['proxy']),
+        base_url=CONFIG['PUBLIC_BASE_URL'],
+    ) as client:
+        registration = register(client)
+        _, fields = begin_consent(client, registration)
+        data = fields | {'action': 'approve', 'submit': 'true'}
+        rejected = client.post(
+            '/consent', data=data, headers={'Origin': origin}, follow_redirects=False
+        )
+        assert rejected.status_code == 403
+        assert rejected.json() == {'error': 'invalid_origin'}
+        approved = client.post(
+            '/consent', data=data, headers={'Origin': CONFIG['PUBLIC_BASE_URL']},
+            follow_redirects=False,
+        )
+        assert approved.status_code == 302
+        assert approved.headers['location'].startswith(CONFIG['COGNITO_DOMAIN'] + '/oauth2/authorize?')
+        assert approved.headers['referrer-policy'] == 'no-referrer'
+        assert approved.headers['cache-control'] == 'no-store'
 
 
 def test_upstream_callback_exception_does_not_expose_sensitive_detail(

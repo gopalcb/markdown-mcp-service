@@ -40,7 +40,10 @@ downstream PKCE, state and redirect checks remain provided by FastMCP. DCR accep
 only ChatGPT's documented callback patterns and loopback `/callback` for desktop
 hosts; registration alone grants no tool access. OAuth requests have a separate
 60-request burst/one-per-second task budget, 64-KiB bodies and a 15-second deadline.
-OAuth responses have no-store/no-referrer headers; upstream 5xx response details
+OAuth responses have no-store/no-referrer headers, except successful GET /consent
+HTML uses strict-origin so native form submissions retain their Origin without
+leaking transaction paths or queries through Referer. Null and foreign origins
+remain rejected; consent CSRF and cookie checks remain enforced. Upstream 5xx response details
 are replaced by a generic error. Protocol/auth/HTTP library logs are sanitized.
 
 `oauth_storage.py` uses the workload role and a dedicated DynamoDB table with

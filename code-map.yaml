@@ -364,6 +364,9 @@ files:
       test_oauth_ingress_bounds_host_origin_and_private_response_headers:
         summary: Reject hostile OAuth inputs before persistence and keep normal responses
           private.
+      test_consent_origin_rejection_preserves_valid_transaction:
+        summary: Reject foreign or opaque consent even with valid CSRF; allow the
+          real page origin.
       test_upstream_callback_exception_does_not_expose_sensitive_detail:
         summary: Replace upstream failure HTML with a generic private error without
           credentials.
