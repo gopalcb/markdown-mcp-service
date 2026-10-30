@@ -8,12 +8,15 @@ import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import Mock
 from urllib.parse import parse_qs, urlsplit
 
+import boto3
 import httpx2
 import jwt
 import pytest
 from botocore.exceptions import ClientError
+from botocore.stub import Stubber
 from fastapi.testclient import TestClient
 from fastmcp.server.auth.oauth_proxy.proxy import AsyncOAuth2Client
 from test_mcp import CONFIG, JWKS, KEY, app_module, claims
@@ -573,3 +576,36 @@ def test_revoke_during_refresh_cannot_resurrect_session(oauth_setup, monkeypatch
                 release.set()
             assert future.result(timeout=5).status_code == 401
         assert tool_list(first, tokens['access_token']).status_code == 401
+
+
+def test_runtime_startup_reads_key_with_actual_boto_client(monkeypatch) -> None:
+    """Exercise production startup with a stubbed real boto client, which has no context protocol."""
+    session = boto3.Session(
+        aws_access_key_id='fixture-access',
+        aws_secret_access_key='fixture-secret',
+        region_name='ca-central-1',
+    )
+    secret = session.client('secretsmanager')
+    dynamo = session.client('dynamodb')
+    session_factory = Mock()
+    session_factory.client.side_effect = lambda name, **kwargs: (
+        secret if name == 'secretsmanager' else dynamo
+    )
+    monkeypatch.setattr(
+        'mcp_services.oauth_service.boto3.Session', Mock(return_value=session_factory)
+    )
+    with Stubber(secret) as stub:
+        stub.add_response(
+            'get_secret_value',
+            {'SecretString': SIGNING_KEY},
+            {'SecretId': CONFIG['OAUTH_SECRET_ARN']},
+        )
+        with TestClient(
+            app_module.create_app(CONFIG), base_url=CONFIG['PUBLIC_BASE_URL']
+        ) as client:
+            assert client.get('/health').status_code == 200
+            assert client.get('/.well-known/oauth-authorization-server').json()[
+                'code_challenge_methods_supported'
+            ] == ['S256']
+        stub.assert_no_pending_responses()
+    dynamo.close()

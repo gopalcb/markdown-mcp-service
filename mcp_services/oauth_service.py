@@ -220,10 +220,13 @@ def create_oauth(
         state_store = OAuthStateStore(
             session.client('dynamodb', config=options), config['OAUTH_STATE_TABLE']
         )
-        with session.client('secretsmanager', config=options) as secrets:
+        secrets = session.client('secretsmanager', config=options)
+        try:
             signing_key = secrets.get_secret_value(SecretId=config['OAUTH_SECRET_ARN'])[
                 'SecretString'
             ]
+        finally:
+            secrets.close()
     if len(signing_key) < 32:
         raise ValueError('OAuth signing key must contain at least 32 random characters')
     encrypted = FernetEncryptionWrapper(

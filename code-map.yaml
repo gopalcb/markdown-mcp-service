@@ -373,6 +373,9 @@ files:
           write.
       test_revoke_during_refresh_cannot_resurrect_session.paused_refresh:
         summary: Pause the upstream response while another task revokes the session.
+      test_runtime_startup_reads_key_with_actual_boto_client:
+        summary: Exercise production startup with a stubbed real boto client, which
+          has no context protocol.
   tests/test_storage_contract.py:
     purpose: Protect the independent source snapshot and version-pinned overwrite
       contract.
