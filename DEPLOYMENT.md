@@ -145,6 +145,9 @@ metadata is `/.well-known/oauth-authorization-server`; the issuer is the CloudFr
 origin plus `/`. Never replace Cognito's discovery with fabricated capabilities.
 
 The adapter maintains explicit consent and separate upstream/downstream PKCE.
+Cognito requests omit `resource` because its URL binding cannot be combined with
+the existing `markdown-api/write` scope. The adapter validates the dedicated client,
+issuer, owner and scope, and binds its own downstream tokens to the MCP resource.
 Follow the host-initiated authorization flow, approve service access and complete
 email sign-in privately. No password, OTP, tokens or signing key belongs in chat,
 source, job inputs or logs. Saved plugin configuration does not prove a login.

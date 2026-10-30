@@ -6,7 +6,9 @@ and Markdown storage contract. Add a maintained FastMCP 4.1.4 OAuthProxy in the
 existing container: its own issuer, S256 discovery, DCR, consent, PKCE, reference
 tokens and refresh; Cognito remains the upstream identity provider. A fixed
 CloudFront /auth/callback is the only upstream callback. Preserve signature,
-issuer, audience, dedicated-client, owner and scope verification for Cognito tokens.
+issuer, dedicated-client, owner and scope verification for Cognito tokens. Require
+resource audience on downstream tokens; upstream Cognito tokens may omit audience
+because the existing custom scope cannot be combined with URL resource binding.
 Do not forward upstream tokens to ChatGPT or fabricate Cognito discovery.
 
 Persist OAuth state encrypted in a dedicated TTL DynamoDB table with a stable

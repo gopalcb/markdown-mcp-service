@@ -10,8 +10,8 @@ from starlette.responses import JSONResponse
 MAX_BODY_BYTES = 3_000_000
 
 
-def verify_access_token(token: str, config: dict, jwks) -> dict:
-    """Verify signature and exact resource/client binding before subject authorization."""
+def verify_access_token(token: str, config: dict, jwks, require_audience: bool = True) -> dict:
+    """Verify Cognito identity and client; require audience for direct resource tokens."""
     key = jwks.get_signing_key_from_jwt(token)
     claims = jwt.decode(
         token,
@@ -19,9 +19,15 @@ def verify_access_token(token: str, config: dict, jwks) -> dict:
         algorithms=['RS256'],
         issuer=config['COGNITO_ISSUER'],
         audience=config['MCP_RESOURCE'],
-        options={'require': ['exp', 'iat', 'sub', 'iss', 'aud']},
+        options={
+            'require': ['exp', 'iat', 'sub', 'iss'] + (['aud'] if require_audience else []),
+            'verify_aud': require_audience,
+        },
         leeway=30,
     )
+
+    if not require_audience and 'aud' in claims and claims['aud'] != config['MCP_RESOURCE']:
+        raise jwt.InvalidTokenError('Invalid upstream audience')
 
     if (
         claims.get('token_use') != 'access'

@@ -31,8 +31,8 @@ files:
       logging.
     functions:
       verify_access_token:
-        summary: Verify signature and exact resource/client binding before subject
-          authorization.
+        summary: Verify Cognito identity and client; require audience for direct resource
+          tokens.
       IngressMiddleware.__init__:
         summary: Keep a bounded global token bucket and injected token verifier.
       IngressMiddleware.__call__:
@@ -330,7 +330,8 @@ files:
         summary: Emulate Cognito code exchange while checking dedicated-client PKCE
           binding.
       oauth_setup.refresh_token:
-        summary: Return a fresh audience-bound upstream token and record refresh use.
+        summary: Return a fresh Cognito token without audience and record refresh
+          use.
       oauth_setup.revoke:
         summary: Accept only the expected private Cognito refresh-token revocation.
       register:
