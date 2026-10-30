@@ -236,6 +236,16 @@ class OAuthIngressMiddleware:
             if suppress_error_body:
                 return
             if message['type'] == 'http.response.start':
+                # no-referrer makes native form POSTs send Origin: null. Keep the
+                # consent page origin, but never disclose its transaction query.
+                consent_html = (
+                    path == '/consent'
+                    and scope.get('method') == 'GET'
+                    and message['status'] == 200
+                    and dict(message.get('headers', []))
+                    .get(b'content-type', b'')
+                    .split(b';', 1)[0] == b'text/html'
+                )
                 response_headers = [
                     (k, v)
                     for k, v in message.get('headers', [])
@@ -245,7 +255,7 @@ class OAuthIngressMiddleware:
                     'headers': response_headers
                     + [
                         (b'cache-control', b'no-store'),
-                        (b'referrer-policy', b'no-referrer'),
+                        (b'referrer-policy', b'strict-origin' if consent_html else b'no-referrer'),
                     ]
                 }
             await send(message)
