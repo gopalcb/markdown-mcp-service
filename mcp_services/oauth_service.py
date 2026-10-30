@@ -43,7 +43,9 @@ class CognitoVerifier(TokenVerifier):
     async def verify_token(self, token: str) -> AccessToken | None:
         """Verify Cognito before issuing or accepting any proxy authorization."""
         try:
-            claims = await asyncio.to_thread(verify_access_token, token, self.config, self.jwks)
+            claims = await asyncio.to_thread(
+                verify_access_token, token, self.config, self.jwks, require_audience=False
+            )
             scopes = claims.get('scope', '').split()
             if (
                 claims['sub'] != self.config['ALLOWED_SUB']
@@ -247,7 +249,7 @@ def create_oauth(
         issuer_url=config['PUBLIC_BASE_URL'],
         redirect_path='/auth/callback',
         forward_pkce=True,
-        extra_authorize_params={'resource': config['MCP_RESOURCE']},
+        forward_resource=False,
         valid_scopes=[config['MCP_WRITE_SCOPE']],
         allowed_client_redirect_uris=ALLOWED_REDIRECTS,
         client_storage=encrypted,

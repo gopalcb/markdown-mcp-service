@@ -83,7 +83,11 @@ def oauth_setup(monkeypatch) -> dict:
         assert len(kwargs['code_verifier']) >= 43
         upstream['calls'].append(('code', kwargs))
         return {
-            'access_token': jwt.encode(claims() | upstream['claims'], KEY, algorithm='RS256'),
+            'access_token': jwt.encode(
+                {k: v for k, v in claims().items() if k != 'aud'} | upstream['claims'],
+                KEY,
+                algorithm='RS256',
+            ),
             'refresh_token': 'fixture-private-cognito-refresh',
             'expires_in': 300,
             'token_type': 'Bearer',
@@ -91,12 +95,14 @@ def oauth_setup(monkeypatch) -> dict:
         }
 
     async def refresh_token(client, url: str, **kwargs) -> dict:
-        """Return a fresh audience-bound upstream token and record refresh use."""
+        """Return a fresh Cognito token without audience and record refresh use."""
         assert url == CONFIG['COGNITO_DOMAIN'] + '/oauth2/token'
         assert kwargs['refresh_token'] == 'fixture-private-cognito-refresh'
         upstream['calls'].append(('refresh', kwargs))
         return {
-            'access_token': jwt.encode(claims(), KEY, algorithm='RS256'),
+            'access_token': jwt.encode(
+                {k: v for k, v in claims().items() if k != 'aud'}, KEY, algorithm='RS256'
+            ),
             'refresh_token': 'fixture-private-cognito-refresh',
             'expires_in': 300,
             'token_type': 'Bearer',
@@ -173,7 +179,7 @@ def authorize(client: TestClient, registration: dict) -> tuple[str, dict]:
     assert upstream_url.scheme + '://' + upstream_url.netloc == CONFIG['COGNITO_DOMAIN']
     query = parse_qs(upstream_url.query)
     assert query['redirect_uri'] == [CONFIG['PUBLIC_BASE_URL'] + '/auth/callback']
-    assert query['resource'] == [CONFIG['MCP_RESOURCE']]
+    assert 'resource' not in query
     assert query['code_challenge_method'] == ['S256']
     assert query['code_challenge'][0] != CHALLENGE
     callback = client.get(
@@ -243,12 +249,24 @@ def test_oauth_exchange_restart_refresh_revoke(oauth_setup) -> None:
         response = exchange(client, registration, code)
         assert response.status_code == 200
         tokens = response.json()
+        assert (
+            jwt.decode(tokens['access_token'], options={'verify_signature': False})['aud']
+            == CONFIG['MCP_RESOURCE']
+        )
         assert exchange(client, registration, code).status_code == 401
         assert (
             tool_list(client, tokens['access_token']).json()['result']['tools'][0]['name']
             == 'save_markdown'
         )
-        assert tool_list(client, jwt.encode(claims(), KEY, algorithm='RS256')).status_code == 401
+        assert (
+            tool_list(
+                client,
+                jwt.encode(
+                    {k: v for k, v in claims().items() if k != 'aud'}, KEY, algorithm='RS256'
+                ),
+            ).status_code
+            == 401
+        )
 
     persisted = repr(setup['database'].items)
     assert 'fixture-private-cognito-refresh' not in persisted

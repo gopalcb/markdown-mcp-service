@@ -43,3 +43,12 @@ support context-manager protocol. Replaced the with block with try/finally close
 and added a production create_app startup test using a stubbed actual boto client.
 Queued run41058205857 was cancelled to avoid repeating the startup failure.
 The next deployment includes this fix and the already merged USER_AUTH setting.
+
+Run41060622441 completed successfully. The live consent-to-Cognito check exposed
+invalid_request: custom scopes requested for resource-binding must be assigned
+to the resource being requested. Cognito rejects markdown-api/write with the
+CloudFront URL resource. Disabled upstream resource forwarding; accept absent
+upstream audience while retaining issuer/signature/client/owner/scope checks and
+rejecting mismatched supplied audience. Downstream reference tokens retain MCP
+audience binding. Fixtures now model actual audience-less Cognito tokens.
+All 61 tests pass; updated correction requires one further deployment.
