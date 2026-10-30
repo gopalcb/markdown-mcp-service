@@ -5,6 +5,8 @@ file-group: workflow-docs
 
 Authenticated `save_markdown` uploads to the existing Work Organizer versioned storage and index. Standalone project and repository for independent image builds and GitHub deployment. It uses a dedicated service/container in the existing `softrobots-systems` ECS cluster; no new cluster is provisioned. See [architecture](ARCHITECTURE.md) and [deployment](DEPLOYMENT.md).
 
+Deployed MCP endpoint: [connect with the exact `/mcp/` URL](https://ma-b3704d923a424812b95854c699ddeb9e.ecs.ca-central-1.on.aws/mcp/). Health, metadata and anonymous denial are verified. OAuth login remains disabled until the real host callback is registered; authenticated uploads are not yet verified. See [deployment evidence](docs/tasks/2026-10-30-independent-project/summary.md).
+
 Build from the repository root:
 
 ```sh

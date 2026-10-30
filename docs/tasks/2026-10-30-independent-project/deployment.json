@@ -1,0 +1,38 @@
+{
+  "endpoint": "https://ma-b3704d923a424812b95854c699ddeb9e.ecs.ca-central-1.on.aws/mcp/",
+  "image": "249766001220.dkr.ecr.ca-central-1.amazonaws.com/markdown-mcp-service@sha256:9e99e1f046fb6764cdc56e55525cbd3fe7467bec61f08c7705cf86165b6235c8",
+  "client_id": "4b7pjdn3vjsrb0rbadrarco4sl",
+  "oauth_configured": "false",
+  "authenticated_upload_verified": false,
+  "verification": {
+    "/health": {
+      "status": 200,
+      "body": {
+        "status": "ok"
+      }
+    },
+    "/.well-known/oauth-protected-resource/mcp": {
+      "status": 200,
+      "body": {
+        "resource": "https://ma-b3704d923a424812b95854c699ddeb9e.ecs.ca-central-1.on.aws/mcp/",
+        "authorization_servers": [
+          "https://cognito-idp.ca-central-1.amazonaws.com/ca-central-1_VwnNJYce8"
+        ],
+        "scopes_supported": [
+          "markdown-api/write"
+        ],
+        "bearer_methods_supported": [
+          "header"
+        ]
+      }
+    },
+    "/mcp/": {
+      "status": 401,
+      "challenge": "Bearer resource_metadata=\"https://ma-b3704d923a424812b95854c699ddeb9e.ecs.ca-central-1.on.aws/.well-known/oauth-protected-resource/mcp\""
+    }
+  },
+  "cluster": "softrobots-systems",
+  "service": "markdown-mcp-service",
+  "source_commit": "2de9f229d959c3fb2587277f00d2faf6fe6b079f",
+  "workflow_run": "https://github.com/gopalcb/markdown-mcp-service/actions/runs/41043343195"
+}
