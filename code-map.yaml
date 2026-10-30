@@ -87,6 +87,9 @@ files:
       provision:
         summary: Apply the dedicated stack using the independent GitHub role and existing
           ECS cluster.
+      provision_edge:
+        summary: Bind a dedicated uncached CloudFront distribution to the existing
+          Express origin.
       verify_storage_and_owner:
         summary: Check required existing storage protections and resolve only gopalcbala's
           subject.
@@ -135,6 +138,15 @@ files:
       test_independent_repository_identity_is_required:
         summary: Old Softrobots identity or another repository cannot deploy this
           standalone service.
+      test_edge_provision_is_bound_to_regional_origin:
+        summary: Deploy only the owned edge stack with the exact HTTPS Express origin
+          parameter.
+      test_existing_service_switches_to_cloudfront_audience:
+        summary: Update the existing service once; never publish its origin as the
+          new MCP audience.
+      test_edge_keeps_mcp_uncached_and_preserves_authorization_transport:
+        summary: Pin the security-sensitive CloudFront policies and origin TLS/method
+          configuration.
   services/__init__.py:
     purpose: Document validation, storage, indexing and operational logging services.
     functions: {}
@@ -205,6 +217,11 @@ files:
       test_storage_errors_do_not_expose_aws_details:
         summary: Sanitize errors outside the shared per-file coordinator as uncertain
           failures.
+      test_cloudfront_resource_with_explicit_origin_host:
+        summary: Accept the configured origin Host, retaining edge audience and browser-origin
+          checks.
+      test_origin_hostname_config_rejects_urls_ports_and_arbitrary_hosts:
+        summary: Only the literal regional ECS hostname can extend the SDK Host allowlist.
   tests/test_storage_contract.py:
     purpose: Protect the independent source snapshot and version-pinned overwrite
       contract.

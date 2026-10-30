@@ -9,7 +9,10 @@
         "cloudformation:UpdateStack",
         "cloudformation:DeleteStack"
       ],
-      "Resource": "arn:aws:cloudformation:ca-central-1:249766001220:stack/markdown-mcp-service/*"
+      "Resource": [
+        "arn:aws:cloudformation:ca-central-1:249766001220:stack/markdown-mcp-service/*",
+        "arn:aws:cloudformation:ca-central-1:249766001220:stack/markdown-mcp-service-edge/*"
+      ]
     },
     {
       "Sid": "ReadMcpStack",
@@ -18,7 +21,10 @@
         "cloudformation:DescribeStacks",
         "cloudformation:DescribeStackEvents"
       ],
-      "Resource": "arn:aws:cloudformation:ca-central-1:249766001220:stack/markdown-mcp-service/*"
+      "Resource": [
+        "arn:aws:cloudformation:ca-central-1:249766001220:stack/markdown-mcp-service/*",
+        "arn:aws:cloudformation:ca-central-1:249766001220:stack/markdown-mcp-service-edge/*"
+      ]
     },
     {
       "Sid": "PassMcpRuntimeRoles",
@@ -226,6 +232,76 @@
       "Condition": {
         "ArnEquals": {
           "ecs:cluster": "arn:aws:ecs:ca-central-1:249766001220:cluster/softrobots-systems"
+        }
+      }
+    },
+    {
+      "Sid": "CreateOwnedMcpEdge",
+      "Effect": "Allow",
+      "Action": "cloudfront:CreateDistribution",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "markdown-mcp-service-edge"
+        },
+        "ForAnyValue:StringEquals": {
+          "aws:CalledVia": [
+            "cloudformation.amazonaws.com"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "TagMcpEdgeThroughCloudFormation",
+      "Effect": "Allow",
+      "Action": "cloudfront:TagResource",
+      "Resource": "arn:aws:cloudfront::249766001220:distribution/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/Project": "markdown-mcp-service-edge"
+        },
+        "ForAnyValue:StringEquals": {
+          "aws:CalledVia": [
+            "cloudformation.amazonaws.com"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ManageOnlyOwnedMcpEdge",
+      "Effect": "Allow",
+      "Action": [
+        "cloudfront:GetDistribution",
+        "cloudfront:GetDistributionConfig",
+        "cloudfront:UpdateDistribution",
+        "cloudfront:DeleteDistribution",
+        "cloudfront:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:cloudfront::249766001220:distribution/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Project": "markdown-mcp-service-edge"
+        }
+      }
+    },
+    {
+      "Sid": "RemoveOnlyNonOwnershipEdgeTags",
+      "Effect": "Allow",
+      "Action": "cloudfront:UntagResource",
+      "Resource": "arn:aws:cloudfront::249766001220:distribution/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Project": "markdown-mcp-service-edge"
+        },
+        "ForAllValues:StringNotEquals": {
+          "aws:TagKeys": [
+            "Project"
+          ]
+        },
+        "ForAnyValue:StringEquals": {
+          "aws:CalledVia": [
+            "cloudformation.amazonaws.com"
+          ]
         }
       }
     }

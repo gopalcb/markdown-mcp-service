@@ -55,7 +55,7 @@ def create_app(config: dict | None = None, verifier=None) -> FastAPI:
         streamable_http_path='/',
         transport_security=TransportSecuritySettings(
             enable_dns_rebinding_protection=True,
-            allowed_hosts=[host],
+            allowed_hosts=list(dict.fromkeys([host, config.get('MCP_ORIGIN_HOST', host)])),
             allowed_origins=[config.get('PUBLIC_BASE_URL', 'https://bootstrap.invalid')],
         ),
     )
