@@ -126,6 +126,8 @@ The owner `gopalcbala` remains in pool `ca-central-1_VwnNJYce8`; no user or
 pool-wide authentication settings change. The dedicated upstream client remains
 `4b7pjdn3vjsrb0rbadrarco4sl`. The deployment reads the owned edge stack output and
 automatically enables its code grant, allowed scopes and fixed `/auth/callback`.
+The app client also enables `ALLOW_USER_AUTH`, required for the existing pool's
+email-OTP choice in managed login; refresh-only explicit flows are insufficient.
 No host callback input is needed. On a fresh installation, the first revision is
 health-only until the edge exists and the callback is configured.
 
