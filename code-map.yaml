@@ -262,6 +262,17 @@ files:
       store_document:
         summary: Persist the object; propagate errors so the index is never marked
           ready early.
+  tests/test_langchain.py:
+    purpose: Verify the optional LangChain client against the authenticated ASGI MCP
+      boundary.
+    functions:
+      test_langchain_discovery_and_receipts:
+        summary: Adapt real HTTP tools and retain per-file results without a model
+          or cloud write.
+      test_langchain_discovery_and_receipts.client_factory:
+        summary: Keep every client request inside the fixture ASGI application.
+      test_langchain_discovery_and_receipts.exercise_adapter:
+        summary: Discover and call the actual tool through LangChain's MCP adaptation.
   tests/test_mcp.py:
     purpose: Exercise signed JWT boundaries, real SDK transport and production storage
       contracts.
