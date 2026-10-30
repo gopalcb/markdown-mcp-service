@@ -3,7 +3,7 @@ file-group: workflow-docs
 ---
 # Markdown MCP Service
 
-Authenticated `save_markdown` uploads to the existing Work Organizer versioned storage and index. Standalone project and repository for independent image builds and GitHub deployment. It uses a dedicated service/container in the existing `softrobots-systems` ECS cluster; no new cluster is provisioned. See [architecture](ARCHITECTURE.md) and [deployment](DEPLOYMENT.md).
+Authenticated `save_markdown` uploads to the existing Work Organizer latest-file storage and compact index. Standalone project and repository for independent image builds and GitHub deployment. It uses a dedicated service/container in the existing `softrobots-systems` ECS cluster; no new cluster is provisioned. See [architecture](ARCHITECTURE.md) and [deployment](DEPLOYMENT.md).
 
 Canonical CloudFront MCP endpoint: [https://d3cjbof2ij7jy9.cloudfront.net/mcp/](https://d3cjbof2ij7jy9.cloudfront.net/mcp/). The OAuth adapter supplies discovery, dynamic client registration and Cognito sign-in. Deployment and private acceptance status are recorded in [OAuth repair evidence](docs/tasks/2026-10-30-chatgpt-oauth/summary.md).
 
@@ -38,7 +38,7 @@ Tool arguments:
 {"payload":{"username":"gopalcbala","file-group":"learning-chatgpt","files":[{"name":"example.md","content":"# Example","metadata":{"project":"chatgpt-web-chat","relative_path":"notes"}}]}}
 ```
 
-`READY` confirms the object and indexed version; `INCOMPLETE` means inspect that `file_id` before retrying. A successful batch has `success: true`. The default group is learning-chatgpt. Paths do not create subdirectories, and files are limited to 256 KiB UTF-8 for compatibility with portal reads.
+`READY` confirms the object and compact index update; `INCOMPLETE` means inspect that `file_id` before retrying. A successful batch has `success: true`. The default group is learning-chatgpt. Paths do not create subdirectories, and files are limited to 256 KiB UTF-8 for compatibility with portal reads.
 
 ChatGPT configuration uses OAuth with dynamic client registration (`client.mode: "dcr"`), scope `markdown-api/write`, and this exact MCP URL. Do not enter the upstream Cognito client ID in ChatGPT: that ID belongs to the adapter. Discovery supplies the registration and authorization endpoints. Cognito's callback is automatically registered as `https://d3cjbof2ij7jy9.cloudfront.net/auth/callback`; downstream ChatGPT callbacks register with the adapter. Approve the service's consent screen and complete Cognito email sign-in privately when the host starts authorization. Saving a plugin is not evidence of a working connection.
 

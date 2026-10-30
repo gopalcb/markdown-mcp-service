@@ -160,8 +160,6 @@ def provision_edge(session, origin: str) -> dict:
 def verify_storage_and_owner(session) -> str:
     """Check required existing storage protections and resolve only gopalcbala's subject."""
     s3 = session.client('s3')
-    if s3.get_bucket_versioning(Bucket=BUCKET).get('Status') != 'Enabled':
-        raise ValueError('Existing document bucket must have versioning enabled')
     rules = s3.get_bucket_encryption(Bucket=BUCKET)['ServerSideEncryptionConfiguration']['Rules']
     if not any(
         rule['ApplyServerSideEncryptionByDefault']['SSEAlgorithm'] == 'AES256' for rule in rules

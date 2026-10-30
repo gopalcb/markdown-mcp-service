@@ -68,7 +68,7 @@ def create_app(config: dict | None = None, verifier=None, oauth=None) -> FastAPI
         },
     )
     async def save_markdown(payload: UploadBatch) -> dict:
-        """Save Markdown to Work Organizer. Same group/name creates a new S3 version; partial batches are not atomic. Do not retry unverified files blindly."""
+        """Save Markdown to Work Organizer. Same group/name replaces the latest bytes and retains one document ID; partial batches are not atomic. Do not retry unverified files blindly."""
 
         return await save_batch(payload, config)
 

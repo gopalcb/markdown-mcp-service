@@ -1,21 +1,17 @@
 project: markdown-mcp-service
 files:
   app.py:
-    purpose: Expose the authenticated stateless Markdown MCP server and public discovery
-      routes.
+    purpose: Expose the authenticated stateless Markdown MCP server and public discovery routes.
     functions:
       ProtocolLogFilter.filter:
-        summary: Replace library diagnostic strings and tracebacks with a safe event
-          category.
+        summary: Replace library diagnostic strings and tracebacks with a safe event category.
       configure_protocol_logging:
-        summary: Use a sanitized handler for protocol-library errors; storage logs
-          are separate.
+        summary: Use a sanitized handler for protocol-library errors; storage logs are separate.
       create_app:
-        summary: Construct isolated SDK lifecycle and dependencies for production
-          or fixture tests.
+        summary: Construct isolated SDK lifecycle and dependencies for production or fixture tests.
       create_app.save_markdown:
-        summary: Save Markdown to Work Organizer. Same group/name creates a new S3
-          version; partial batches are not atomic. Do not retry unverified files blindly.
+        summary: Save Markdown to Work Organizer. Same group/name replaces the latest bytes and retains one document
+          ID; partial batches are not atomic. Do not retry unverified files blindly.
       create_app.lifespan:
         summary: Run the SDK session manager for the lifetime of the ASGI worker.
       create_app.health:
@@ -136,119 +132,86 @@ files:
         summary: Allow only literal ChatGPT callback paths or local native callback
           origins.
   scripts/deploy.py:
-    purpose: 'Provision and deploy only Markdown MCP through the main-branch GitHub
-      role.
-
-
-      CloudFormation owns its image repository, task roles and dedicated OAuth client.
-
-      ECS Express owns HTTPS ingress. A health-only first revision obtains its hostname
-
-      before the enabled revision binds the exact OAuth audience. OAuth state and
-      key
-
-      material persist only in the owned table and secret, never deployment artifacts.'
+    purpose: Provision and deploy only Markdown MCP through the main-branch GitHub role.
     functions:
       github_session:
-        summary: Reject local mutation and unrelated repository, account, branch or
-          identity.
+        summary: Reject local mutation and unrelated repository, account, branch or identity.
       stack_state:
-        summary: Read the exact stack, accepting absence only for its explicit missing
-          error.
+        summary: Read the exact stack, accepting absence only for its explicit missing error.
       wait_stack:
-        summary: Read completion every two minutes; fail on rollback without retrying
-          writes.
+        summary: Read completion every two minutes; fail on rollback without retrying writes.
       verify_existing_cluster:
         summary: Require the existing cluster and never create a replacement cluster.
       provision:
-        summary: Apply owned resources and derive the fixed Cognito callback from
-          the edge stack.
+        summary: Apply owned resources and derive the fixed Cognito callback from the edge stack.
       provision_edge:
-        summary: Bind a dedicated uncached CloudFront distribution to the existing
-          Express origin.
+        summary: Bind a dedicated uncached CloudFront distribution to the existing Express origin.
       verify_storage_and_owner:
-        summary: Check required existing storage protections and resolve only gopalcbala's
-          subject.
+        summary: Check required existing storage protections and resolve only gopalcbala's subject.
       public_subnets:
-        summary: Select default public subnets with verified internet routes in two
-          zones.
+        summary: Select default public subnets with verified internet routes in two zones.
       service_state:
         summary: Read only the owned Express service, preserving real access failures.
       service_url:
-        summary: Extract the HTTPS hostname provided by Express without guessing its
-          format.
+        summary: Extract the HTTPS hostname provided by Express without guessing its format.
       wait_service:
         summary: Require the matching image/environment revision's successful deployment.
       verify_endpoint:
-        summary: Check public health, real S256 discovery, resource binding and anonymous
-          denial once.
+        summary: Check public health, real S256 discovery, resource binding and anonymous denial once.
       deploy:
-        summary: Create a health-only bootstrap if needed, then deploy the bound MCP
-          resource.
+        summary: Create a health-only bootstrap if needed, then deploy the bound MCP resource.
       main:
-        summary: Run one guarded infrastructure or container stage and save nonsecret
-          output.
+        summary: Run one guarded infrastructure or container stage and save nonsecret output.
   scripts/tests/test_deploy.py:
-    purpose: Check deployment guards, additive stack parameters and exact rollout
-      matching.
+    purpose: Check deployment guards, additive stack parameters and exact rollout matching.
     functions:
       test_local_deployment_is_rejected:
-        summary: A valid AWS identity alone must never enable local infrastructure
-          writes.
+        summary: A valid AWS identity alone must never enable local infrastructure writes.
       test_provision_derives_owned_callback_and_uses_caller_role:
-        summary: The fixed upstream callback comes from the owned edge, without a
-          guessed host callback.
+        summary: The fixed upstream callback comes from the owned edge, without a guessed host callback.
       test_provision_refuses_concurrent_infrastructure_change:
         summary: Do not issue another update while the owned stack is changing.
       test_invalid_owned_edge_rejected_before_aws_write:
         summary: An invalid edge output must never register an attacker callback.
       test_first_provision_keeps_oauth_disabled_until_edge_exists:
-        summary: A fresh install creates state/key resources without registering a
-          guessed callback.
+        summary: A fresh install creates state/key resources without registering a guessed callback.
       test_rollout_requires_successful_exact_environment:
         summary: A prior health-only revision with the same image cannot pass activation.
       test_deploy_requires_dedicated_immutable_image:
         summary: Tags or another service's digest cannot become this service's revision.
       test_missing_cluster_fails_before_any_creation:
-        summary: The standalone project must never create a cluster when the existing
-          one is missing.
+        summary: The standalone project must never create a cluster when the existing one is missing.
       test_delivery_role_policy_is_complete_and_has_no_self_management:
-        summary: Independent delivery owns only its service and cannot create clusters
-          or edit its identity.
+        summary: Independent delivery owns only its service and cannot create clusters or edit its identity.
       test_oauth_resources_have_retention_ttl_and_narrow_permissions:
-        summary: Persist encrypted OAuth state/key while keeping secret values outside
-          deployment access.
+        summary: Persist encrypted OAuth state/key while keeping secret values outside deployment access.
       test_public_verification_requires_real_s256_adapter_discovery:
-        summary: Successful health alone cannot hide missing OAuth discovery or wrong
-          resource binding.
+        summary: Successful health alone cannot hide missing OAuth discovery or wrong resource binding.
       test_independent_repository_identity_is_required:
-        summary: Old Softrobots identity or another repository cannot deploy this
-          standalone service.
+        summary: Old Softrobots identity or another repository cannot deploy this standalone service.
       test_edge_provision_is_bound_to_regional_origin:
-        summary: Deploy only the owned edge stack with the exact HTTPS Express origin
-          parameter.
+        summary: Deploy only the owned edge stack with the exact HTTPS Express origin parameter.
       test_existing_service_switches_to_cloudfront_audience:
-        summary: Update the existing service once; never publish its origin as the
-          new MCP audience.
+        summary: Update the existing service once; never publish its origin as the new MCP audience.
       test_edge_keeps_mcp_uncached_and_preserves_authorization_transport:
-        summary: Pin the security-sensitive CloudFront policies and origin TLS/method
-          configuration.
+        summary: Pin the security-sensitive CloudFront policies and origin TLS/method configuration.
+      test_compact_storage_reads_remain_owner_scoped:
+        summary: Conditional overwrite reads add no bucket listing or cross-owner table access.
+      test_storage_preflight_does_not_require_versioning:
+        summary: Suspension must not block deployment while encryption, TLS and owner checks remain.
   services/__init__.py:
     purpose: Document validation, storage, indexing and operational logging services.
     functions: {}
   services/document_service.py:
-    purpose: Coordinate independent uploads across S3 and the user-files index.
+    purpose: Coordinate latest-only Markdown uploads with the shared compact document index.
     functions:
       store_documents:
-        summary: Return per-file outcomes; leave interrupted records PENDING for reconciliation.
+        summary: Return independent READY receipts only after both object and index acknowledgements.
   services/dynamodb_service.py:
-    purpose: Maintain one upload record keyed by username and file ID.
+    purpose: Publish acknowledged document bytes using the compact shared index schema.
     functions:
-      create_file_record:
-        summary: Record intent before writing objects so interrupted uploads can be
-          inspected.
-      mark_file_ready:
-        summary: Publish readiness only after the S3 object has been acknowledged.
+      publish_file_record:
+        summary: Update one stable record, preserving its creation date and concurrent task edits.
   services/logging_service.py:
     purpose: Emit structured operational events without document bodies or metadata.
     functions:
@@ -256,12 +219,10 @@ files:
         summary: Write only identifiers and safe error types to Lambda's CloudWatch
           stream.
   services/s3_service.py:
-    purpose: Write one versioned private Markdown object in its user and category
-      partition.
+    purpose: Write latest private Markdown bytes with source-bound conditional S3 writes.
     functions:
       store_document:
-        summary: Persist the object; propagate errors so the index is never marked
-          ready early.
+        summary: Acknowledge one conditional write; reject collisions and never require a version ID.
   tests/test_langchain.py:
     purpose: Verify the optional LangChain client against the authenticated ASGI MCP
       boundary.
@@ -274,8 +235,7 @@ files:
       test_langchain_discovery_and_receipts.exercise_adapter:
         summary: Discover and call the actual tool through LangChain's MCP adaptation.
   tests/test_mcp.py:
-    purpose: Exercise signed JWT boundaries, real SDK transport and production storage
-      contracts.
+    purpose: Exercise signed JWT boundaries, real SDK transport and production storage contracts.
     functions:
       claims:
         summary: Produce a valid short-lived fixture access token payload.
@@ -286,42 +246,31 @@ files:
       test_reject_claims:
         summary: Reject each independent authorization failure before MCP dispatch.
       test_signature_and_discovery:
-        summary: Expose discovery but reject missing, malformed and wrongly signed
-          tokens.
+        summary: Expose discovery but reject missing, malformed and wrongly signed tokens.
       test_sdk_and_upload:
-        summary: Initialize real SDK, discover tool schema and invoke its validated
-          storage adapter.
+        summary: Initialize real SDK, discover tool schema and invoke its validated storage adapter.
       test_invalid_batch:
         summary: Reject invalid batch destinations and UTF-8 sizes before storage.
       test_bounded_body_and_rate_limit:
-        summary: Enforce byte limit without trusting Content-Length, then bound request
-          rate.
-      test_versioned_storage_and_uncertainty:
-        summary: Reuse actual S3/index coordinator; publish READY only after version
-          acknowledgment.
+        summary: Enforce byte limit without trusting Content-Length, then bound request rate.
+      test_latest_storage_and_uncertainty:
+        summary: Publish unversioned READY receipts only after S3 and compact index acknowledgements.
       test_bootstrap_and_config:
-        summary: Deny all MCP/discovery during bootstrap and reject resource slash
-          mismatches.
+        summary: Deny all MCP/discovery during bootstrap and reject resource slash mismatches.
       test_protocol_logs_are_sanitized:
-        summary: Ensure even library exception messages cannot write caller content
-          to logs.
+        summary: Ensure even library exception messages cannot write caller content to logs.
       test_partial_and_timeout_results:
-        summary: Preserve partial uncertainty and do not claim success when a timeout
-          follows a save.
+        summary: Preserve partial uncertainty and do not claim success when a timeout follows a save.
       test_sdk_host_and_origin_restrictions:
-        summary: Reject DNS-rebinding hosts and unapproved browser origins before
-          tool execution.
+        summary: Reject DNS-rebinding hosts and unapproved browser origins before tool execution.
       test_storage_errors_do_not_expose_aws_details:
-        summary: Sanitize errors outside the shared per-file coordinator as uncertain
-          failures.
+        summary: Sanitize errors outside the shared per-file coordinator as uncertain failures.
       test_cloudfront_resource_with_explicit_origin_host:
-        summary: Accept the configured origin Host, retaining edge audience and browser-origin
-          checks.
+        summary: Accept the configured origin Host, retaining edge audience and browser-origin checks.
       test_origin_hostname_config_rejects_urls_ports_and_arbitrary_hosts:
         summary: Only the literal regional ECS hostname can extend the SDK Host allowlist.
       test_oauth_redirect_rejects_ambiguous_origins:
-        summary: Do not let wildcard redirect patterns admit userinfo or attacker
-          origins.
+        summary: Do not let wildcard redirect patterns admit userinfo or attacker origins.
   tests/test_oauth.py:
     purpose: Exercise the real OAuth adapter with signed Cognito fixtures and encrypted
       shared state.
@@ -392,12 +341,27 @@ files:
         summary: Exercise production startup with a stubbed real boto client, which
           has no context protocol.
   tests/test_storage_contract.py:
-    purpose: Protect the independent source snapshot and version-pinned overwrite
-      contract.
+    purpose: Protect independently maintained compact storage and conditional overwrite contracts.
     functions:
+      storage_doubles:
+        summary: Provide stateful conditional S3 objects and DynamoDB returned-attribute acknowledgements.
+      storage_doubles.publish:
+        summary: Apply aliased compact fields and retain independently edited task/creation fields.
+      storage_doubles.head:
+        summary: Return stored ownership metadata and the exact object concurrency token.
+      storage_doubles.put:
+        summary: Enforce S3 preconditions before replacing the current object bytes.
+      payload:
+        summary: Use the fixed MCP owner and server-routed category/basename identity.
       test_storage_snapshot_matches_provenance:
-        summary: Fail when vendored shared logic changes without an explicit provenance
-          review.
-      test_same_name_keeps_key_and_pins_distinct_versions:
-        summary: Repeated saves retain separate file receipts while intentionally
-          versioning one key.
+        summary: Detect unreviewed changes to the independently adapted shared storage contract.
+      test_same_name_keeps_stable_compact_row_and_latest_bytes:
+        summary: Unversioned saves retain one ID, creation date and human task while bytes advance.
+      test_existing_raw_object_adoption_preserves_foreign_source:
+        summary: Adopt legacy raw objects only; native leases and foreign source bindings block writes.
+      test_other_project_cannot_overwrite_bound_object:
+        summary: The same routed owner/name cannot silently change its established source project.
+      test_failed_boundary_never_confirms_success:
+        summary: Read, write and publication errors preserve honest independent per-file outcomes.
+      test_missing_index_acknowledgement_cannot_report_ready:
+        summary: An empty DynamoDB update response never fabricates a successful receipt.
