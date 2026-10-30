@@ -176,3 +176,101 @@ def test_independent_repository_identity_is_required(monkeypatch, repo, role, ac
         else:
             with pytest.raises(ValueError):
                 deploy.github_session()
+
+
+def test_edge_provision_is_bound_to_regional_origin() -> None:
+    """Deploy only the owned edge stack with the exact HTTPS Express origin parameter."""
+    session = Mock()
+    with (
+        patch.object(deploy, 'stack_state', return_value=None),
+        patch.object(
+            deploy, 'wait_stack', return_value={'PublicBaseUrl': 'https://edge.cloudfront.net'}
+        ),
+    ):
+        result = deploy.provision_edge(session, 'https://origin.ecs.ca-central-1.on.aws')
+    request = session.client.return_value.create_stack.call_args.kwargs
+    assert request['StackName'] == 'markdown-mcp-service-edge'
+    assert request['Parameters'] == [
+        {'ParameterKey': 'OriginHostname', 'ParameterValue': 'origin.ecs.ca-central-1.on.aws'}
+    ]
+    assert request['Tags'] == [{'Key': 'Project', 'Value': 'markdown-mcp-service-edge'}]
+    assert result['PublicBaseUrl'] == 'https://edge.cloudfront.net'
+    for origin in (
+        'http://origin.ecs.ca-central-1.on.aws',
+        'https://attacker.example',
+        'https://origin.ecs.ca-central-1.on.aws/path',
+    ):
+        with pytest.raises(ValueError):
+            deploy.provision_edge(session, origin)
+
+
+def test_existing_service_switches_to_cloudfront_audience() -> None:
+    """Update the existing service once; never publish its origin as the new MCP audience."""
+    session = Mock()
+    ecs = session.client.return_value
+    ecs.list_service_deployments.return_value = {'serviceDeployments': []}
+    state = {'status': {'statusCode': 'ACTIVE'}}
+    origin = 'https://origin.ecs.ca-central-1.on.aws'
+    edge = {'PublicBaseUrl': 'https://fixture.cloudfront.net', 'DistributionId': 'DIST'}
+    outputs = {
+        'ClientId': 'client',
+        'TaskRoleArn': 'task',
+        'ExecutionRoleArn': 'execution',
+        'OAuthConfigured': 'false',
+    }
+    image = (
+        f'{deploy.ACCOUNT}.dkr.ecr.{deploy.REGION}.amazonaws.com/markdown-mcp-service@sha256:'
+        + 'a' * 64
+    )
+    with (
+        patch.object(deploy, 'verify_existing_cluster'),
+        patch.object(deploy, 'verify_storage_and_owner', return_value='owner'),
+        patch.object(deploy, 'public_subnets', return_value=['subnet']),
+        patch.object(deploy, 'service_state', return_value=state),
+        patch.object(deploy, 'service_url', return_value=origin),
+        patch.object(deploy, 'provision_edge', return_value=edge),
+        patch.object(deploy, 'wait_service', return_value=state),
+        patch.object(deploy, 'verify_endpoint') as verify,
+    ):
+        result = deploy.deploy(session, image, outputs)
+    environment = {
+        entry['name']: entry['value']
+        for entry in ecs.update_express_gateway_service.call_args.kwargs['primaryContainer'][
+            'environment'
+        ]
+    }
+    assert environment['PUBLIC_BASE_URL'] == edge['PublicBaseUrl']
+    assert environment['MCP_RESOURCE'] == edge['PublicBaseUrl'] + '/mcp/'
+    assert environment['MCP_ORIGIN_HOST'] == 'origin.ecs.ca-central-1.on.aws'
+    assert result['endpoint'] == edge['PublicBaseUrl'] + '/mcp/'
+    assert result['origin'] == origin
+    ecs.update_express_gateway_service.assert_called_once()
+    ecs.create_express_gateway_service.assert_not_called()
+    verify.assert_called_once_with(edge['PublicBaseUrl'])
+
+
+def test_edge_keeps_mcp_uncached_and_preserves_authorization_transport() -> None:
+    """Pin the security-sensitive CloudFront policies and origin TLS/method configuration."""
+    loader = type('EdgeLoader', (yaml.SafeLoader,), {})
+    loader.add_multi_constructor('!', lambda loader, tag, node: None)
+    template = yaml.load((deploy.ROOT / 'aws-infrastructure/edge.yaml').read_text(), Loader=loader)
+    distribution = template['Resources']['Distribution']['Properties']['DistributionConfig']
+    behavior = distribution['DefaultCacheBehavior']
+    assert behavior['CachePolicyId'] == '4135ea2d-6df8-44a3-9df3-4b5a84be39ad'
+    assert behavior['OriginRequestPolicyId'] == 'b689b0a8-53d0-40ab-baf2-68738e2966ac'
+    assert set(behavior['AllowedMethods']) == {
+        'GET',
+        'HEAD',
+        'OPTIONS',
+        'PUT',
+        'PATCH',
+        'POST',
+        'DELETE',
+    }
+    assert behavior['ViewerProtocolPolicy'] == 'redirect-to-https'
+    origin = distribution['Origins'][0]['CustomOriginConfig']
+    assert origin['OriginProtocolPolicy'] == 'https-only'
+    assert origin['OriginSSLProtocols'] == ['TLSv1.2']
+    assert all(item['ErrorCachingMinTTL'] == 0 for item in distribution['CustomErrorResponses'])
+    assert 'Logging' not in distribution
+    assert set(template['Resources']) == {'Distribution'}

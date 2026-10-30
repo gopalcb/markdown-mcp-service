@@ -5,7 +5,7 @@ file-group: workflow-docs
 
 Authenticated `save_markdown` uploads to the existing Work Organizer versioned storage and index. Standalone project and repository for independent image builds and GitHub deployment. It uses a dedicated service/container in the existing `softrobots-systems` ECS cluster; no new cluster is provisioned. See [architecture](ARCHITECTURE.md) and [deployment](DEPLOYMENT.md).
 
-Deployed MCP endpoint: [connect with the exact `/mcp/` URL](https://ma-b3704d923a424812b95854c699ddeb9e.ecs.ca-central-1.on.aws/mcp/). Health, metadata and anonymous denial are verified. OAuth login remains disabled until the real host callback is registered; authenticated uploads are not yet verified. See [deployment evidence](docs/tasks/2026-10-30-independent-project/summary.md).
+Previous direct-origin endpoint (CloudFront migration in progress): [connect with the exact `/mcp/` URL](https://ma-b3704d923a424812b95854c699ddeb9e.ecs.ca-central-1.on.aws/mcp/). Health, metadata and anonymous denial are verified. OAuth login remains disabled until the real host callback is registered; authenticated uploads are not yet verified. See [deployment evidence](docs/tasks/2026-10-30-independent-project/summary.md).
 
 Build from the repository root:
 
@@ -27,6 +27,8 @@ Local health-only startup (no AWS calls):
 MCP_ENABLED=false PYTHONPATH=. \
   /tmp/markdown-mcp-venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000 --no-access-log
 ```
+
+Behind CloudFront, also set `MCP_ORIGIN_HOST` to the explicit ECS origin hostname; do not set it from request headers.
 
 For an enabled service supply `PUBLIC_BASE_URL` (HTTPS origin, no trailing slash), `MCP_RESOURCE` (exact origin plus `/mcp/`), `COGNITO_ISSUER`, dedicated `COGNITO_CLIENT_ID`, `MCP_WRITE_SCOPE`, `ALLOWED_SUB`, `S3_BUCKET`, `USER_FILES_TABLE` and the AWS region. Use workload credentials; never set token variables. The exact connection URL includes `/mcp/`.
 

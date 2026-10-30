@@ -14,6 +14,7 @@ import time
 import urllib.request
 from pathlib import Path
 from urllib.error import HTTPError
+from urllib.parse import urlsplit
 
 import boto3
 from botocore.exceptions import ClientError
@@ -48,21 +49,21 @@ def github_session() -> boto3.Session:
     return session
 
 
-def stack_state(client) -> dict | None:
+def stack_state(client, stack_name: str = STACK) -> dict | None:
     """Read the exact stack, accepting absence only for its explicit missing error."""
     try:
-        return client.describe_stacks(StackName=STACK)['Stacks'][0]
+        return client.describe_stacks(StackName=stack_name)['Stacks'][0]
     except ClientError as error:
         if error.response['Error']['Code'] == 'ValidationError' and 'does not exist' in str(error):
             return None
         raise
 
 
-def wait_stack(client) -> dict:
+def wait_stack(client, stack_name: str = STACK) -> dict:
     """Read completion every two minutes; fail on rollback without retrying writes."""
     for _ in range(8):
         time.sleep(120)
-        state = stack_state(client)
+        state = stack_state(client, stack_name)
         status = state['StackStatus'] if state else 'MISSING'
         print(f'Infrastructure: {status}', flush=True)
         if status in {'CREATE_COMPLETE', 'UPDATE_COMPLETE'}:
@@ -115,6 +116,38 @@ def provision(session, callback: str | None) -> dict:
             return {item['OutputKey']: item['OutputValue'] for item in state['Outputs']}
         raise
     return wait_stack(client)
+
+
+def provision_edge(session, origin: str) -> dict:
+    """Bind a dedicated uncached CloudFront distribution to the existing Express origin."""
+    hostname = urlsplit(origin).hostname
+    if (
+        not hostname
+        or origin != 'https://' + hostname
+        or not re.fullmatch(r'[a-z0-9-]+\.ecs\.ca-central-1\.on\.aws', hostname)
+    ):
+        raise ValueError('Expected the exact regional ECS HTTPS origin')
+    stack_name = 'markdown-mcp-service-edge'
+    client = session.client('cloudformation')
+    state = stack_state(client, stack_name)
+    if state and state['StackStatus'].endswith('_IN_PROGRESS'):
+        raise RuntimeError('Existing CloudFront infrastructure operation must finish')
+    request = {
+        'StackName': stack_name,
+        'TemplateBody': (ROOT / 'aws-infrastructure/edge.yaml').read_text(),
+        'Parameters': [{'ParameterKey': 'OriginHostname', 'ParameterValue': hostname}],
+        'Tags': [{'Key': 'Project', 'Value': 'markdown-mcp-service-edge'}],
+    }
+    try:
+        if state:
+            client.update_stack(**request)
+        else:
+            client.create_stack(**request)
+    except ClientError as error:
+        if state and 'No updates are to be performed' in str(error):
+            return {item['OutputKey']: item['OutputValue'] for item in state['Outputs']}
+        raise
+    return wait_stack(client, stack_name)
 
 
 def verify_storage_and_owner(session) -> str:
@@ -305,8 +338,13 @@ def deploy(session, image: str, outputs: dict) -> dict:
             for item in active
         ):
             raise RuntimeError('Existing MCP deployment must complete before a new write')
-    base = service_url(state) if state else 'https://bootstrap.invalid'
+    origin = service_url(state) if state else 'https://bootstrap.invalid'
+    base = origin
+    edge = {}
     for enabled in [True] if state else [False, True]:
+        if enabled:
+            edge = provision_edge(session, origin)
+            base = edge['PublicBaseUrl']
         environment = {
             'AWS_DEFAULT_REGION': REGION,
             'MCP_ENABLED': str(enabled).lower(),
@@ -314,6 +352,7 @@ def deploy(session, image: str, outputs: dict) -> dict:
             'COGNITO_ISSUER': f'https://cognito-idp.{REGION}.amazonaws.com/{POOL}',
             'COGNITO_CLIENT_ID': outputs['ClientId'],
             'MCP_RESOURCE': base + '/mcp/',
+            'MCP_ORIGIN_HOST': urlsplit(origin).hostname,
             'MCP_WRITE_SCOPE': 'markdown-api/write',
             'ALLOWED_SUB': subject,
             'S3_BUCKET': BUCKET,
@@ -349,10 +388,12 @@ def deploy(session, image: str, outputs: dict) -> dict:
                 **config,
             )
         state = wait_service(ecs, container)
-        base = service_url(state)
+        origin = service_url(state)
     verify_endpoint(base)
     return {
         'endpoint': base + '/mcp/',
+        'origin': origin,
+        'distribution_id': edge['DistributionId'],
         'image': image,
         'client_id': outputs['ClientId'],
         'oauth_configured': outputs['OAuthConfigured'],

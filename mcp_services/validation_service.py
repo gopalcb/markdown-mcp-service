@@ -112,4 +112,9 @@ def load_config() -> dict:
     ):
         raise ValueError('Invalid Cognito issuer')
 
+    origin_host = os.environ.get('MCP_ORIGIN_HOST', '')
+    if origin_host:
+        if not re.fullmatch(r'[a-z0-9-]+\.ecs\.ca-central-1\.on\.aws', origin_host):
+            raise ValueError('MCP_ORIGIN_HOST must be the explicit regional ECS hostname')
+        config['MCP_ORIGIN_HOST'] = origin_host
     return config

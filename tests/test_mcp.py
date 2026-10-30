@@ -323,3 +323,67 @@ def test_storage_errors_do_not_expose_aws_details(monkeypatch) -> None:
     with pytest.raises(ValueError, match='Storage not confirmed') as error:
         asyncio.run(save_batch(payload, CONFIG))
     assert 'private-detail' not in str(error.value)
+
+
+def test_cloudfront_resource_with_explicit_origin_host() -> None:
+    """Accept the configured origin Host, retaining edge audience and browser-origin checks."""
+    edge = CONFIG | {
+        'PUBLIC_BASE_URL': 'https://fixture.cloudfront.net',
+        'MCP_RESOURCE': 'https://fixture.cloudfront.net/mcp/',
+        'MCP_ORIGIN_HOST': 'origin.ecs.ca-central-1.on.aws',
+    }
+    verifier = lambda token: verify_access_token(token, edge, JWKS)
+    with TestClient(
+        app_module.create_app(edge, verifier), base_url='https://' + edge['MCP_ORIGIN_HOST']
+    ) as client:
+        payload = {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/list'}
+        authorized = headers({'aud': edge['MCP_RESOURCE']})
+        assert client.post('/mcp/', headers=authorized, json=payload).status_code == 200
+        assert client.post('/mcp/', headers=headers(), json=payload).status_code == 401
+        assert (
+            client.post(
+                '/mcp/', headers=authorized | {'Origin': edge['PUBLIC_BASE_URL']}, json=payload
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                '/mcp/',
+                headers=authorized | {'Origin': 'https://' + edge['MCP_ORIGIN_HOST']},
+                json=payload,
+            ).status_code
+            == 403
+        )
+        assert (
+            client.post(
+                '/mcp/',
+                headers=authorized
+                | {'Host': 'attacker.example', 'X-Forwarded-Host': 'fixture.cloudfront.net'},
+                json=payload,
+            ).status_code
+            == 421
+        )
+        response = client.post('/mcp/', json=payload)
+        assert edge['PUBLIC_BASE_URL'] in response.headers['www-authenticate']
+        assert (
+            client.get('/.well-known/oauth-protected-resource').json()['resource']
+            == edge['MCP_RESOURCE']
+        )
+
+
+def test_origin_hostname_config_rejects_urls_ports_and_arbitrary_hosts(monkeypatch) -> None:
+    """Only the literal regional ECS hostname can extend the SDK Host allowlist."""
+    for name, value in CONFIG.items():
+        if name != 'enabled':
+            monkeypatch.setenv(name, value)
+    monkeypatch.setenv('MCP_ENABLED', 'true')
+    for host in (
+        'https://origin.ecs.ca-central-1.on.aws',
+        'attacker.example',
+        'origin.ecs.ca-central-1.on.aws:443',
+    ):
+        monkeypatch.setenv('MCP_ORIGIN_HOST', host)
+        with pytest.raises(ValueError, match='MCP_ORIGIN_HOST'):
+            load_config()
+    monkeypatch.setenv('MCP_ORIGIN_HOST', 'origin.ecs.ca-central-1.on.aws')
+    assert load_config()['MCP_ORIGIN_HOST'] == 'origin.ecs.ca-central-1.on.aws'
