@@ -36,3 +36,10 @@ ALLOW_USER_AUTH on the dedicated client. Added it without changing pool policy o
 other clients, with a template regression assertion. First adapter deployment
 run41057238373 is still in progress; follow-up config deployment is required.
 Source: https://docs.aws.amazon.com/cognito/latest/developerguide/authentication-flows-selection-managedlogin.html
+
+Deployment run41057238373 failed and ECS rolled back to its previous healthy task.
+Focused startup logs identified TypeError: boto3 SecretsManager client does not
+support context-manager protocol. Replaced the with block with try/finally close
+and added a production create_app startup test using a stubbed actual boto client.
+Queued run41058205857 was cancelled to avoid repeating the startup failure.
+The next deployment includes this fix and the already merged USER_AUTH setting.
