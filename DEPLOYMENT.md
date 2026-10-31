@@ -164,8 +164,8 @@ Tests exercise signed synthetic Cognito tokens through real HTTP OAuth routes,
 restart persistence, replay/CSRF, refresh and revocation. Public smoke checks cover
 health, discovery, anonymous rejection and reaching real Cognito login. They do
 not prove private ChatGPT sign-in, OTP delivery or a real Markdown write. Complete
-private acceptance and a harmless upload with READY/version readback before using
-real documents; do not blindly retry incomplete uploads.
+private acceptance and a harmless upload with a READY receipt and authorized
+stored-byte readback before using real documents; do not blindly retry incomplete uploads.
 
 ## Cost and cleanup
 

@@ -67,7 +67,8 @@ own private credential-storage configuration.
 `save_markdown` advertises a title and explicit annotations: readOnlyHint=false,
 idempotentHint=false, openWorldHint=true, destructiveHint=true. The destructive
 hint is conservative because a repeated group/name changes the current object at
-that key, even though prior versions are retained. Clients may use these hints
+that key. The service does not request or return S3 version IDs and does not
+promise version history. Clients may use these hints
 in their own approval policy; they do not grant authorization or enforce approval.
 The server supports one owner, gopalcbala, not arbitrary per-user identities.
 
@@ -77,8 +78,8 @@ under ToolMessage.artifact['structured_content']) and require `success: true`
 and each receipt's READY status/file_id before claiming delivery. The existing
 partial-batch result is a normal MCP result with `success: false`, per-file
 INCOMPLETE status and reconciliation IDs. Do not rely solely on ToolMessage.status
-or isError. Do not retry uncertain writes: each invocation can create another
-object version. Reconcile the returned file_id first. Ordinary tool exceptions
+or isError. Do not retry uncertain writes: each invocation can replace the current
+object bytes. Reconcile the returned file_id first. Ordinary tool exceptions
 and transport failures are distinct from these per-file outcomes.
 
 No new elicitation/resume mechanism or automatic retries are introduced: resuming
