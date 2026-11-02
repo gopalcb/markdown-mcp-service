@@ -7,6 +7,11 @@ Parameters:
     MaxLength: 253
     AllowedPattern: '^[a-z0-9][a-z0-9.-]+[a-z0-9]$'
     Description: Verified existing ECS Express HTTPS hostname, without scheme, path or port.
+  OriginPath:
+    Type: String
+    Default: ''
+    AllowedValues: ['', /live]
+    Description: Empty for ECS rollback; /live for the Regional REST API stage.
 Resources:
   Distribution:
     Type: AWS::CloudFront::Distribution
@@ -25,6 +30,7 @@ Resources:
         Origins:
           - Id: MarkdownMcpExpress
             DomainName: !Ref OriginHostname
+            OriginPath: !Ref OriginPath
             ConnectionAttempts: 1
             ConnectionTimeout: 10
             CustomOriginConfig:

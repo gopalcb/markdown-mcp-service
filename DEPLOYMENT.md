@@ -4,6 +4,75 @@ file-group: workflow-docs
 
 # Deploy the standalone Markdown MCP service
 
+## Serverless migration
+
+The `serverless.yml` workflow deploys a parallel Regional REST API and Lambda
+container while the existing ECS service remains available for rollback. Use this
+workflow for the migration. The older workflow below continues to deploy ECS.
+
+First synchronize `aws-infrastructure/delivery.yaml` into the Softrobots hash-pinned
+identity bridge and run that reviewed GitHub bootstrap. The inline policy snapshot
+must match `deployer-policy.json`; its aggregate compact size remains below 10,240
+bytes. New API Gateway mutations require CloudFormation; Lambda permissions cover
+only `markdown-mcp-service`, its preview function and their aliases/versions. REST API create operations
+cannot name a future API ID, so the regional REST API resource family is the
+documented provisioning scope and must be reviewed with each change set.
+
+Before preparation, apply the reviewed ECR `RepositoryPolicyText` change in
+`aws-infrastructure/template.yaml` through the existing infrastructure CI, reviewing
+that change separately from production identity/edge configuration. It permits image
+retrieval by the exact production and preview Lambda functions. Preparation only
+reads this policy and stops if either grant is absent; it never updates the
+production app stack or Cognito client to obtain its prerequisite.
+
+Run `serverless.yml` on `main` with action `deploy`. It tests the Linux amd64 image,
+exercises its actual adapter against a disposable local Runtime API, publishes the
+tested image digest and creates/updates the parallel `markdown-mcp-service-serverless`
+and `markdown-mcp-service-preview` stacks. The preview stack owns a separate
+CloudFront distribution, Cognito app client/branding and Lambda/API configured with
+that preview issuer/resource and callback. It preserves the existing production
+OAuth client, table, secret and edge. Its capacity preflight requires at least 100
+unreserved regional executions after reserving two for each function (four total);
+an insufficient quota or denied capacity read is a blocker requiring the approved
+account quota process. Do not bypass this gate by dropping the concurrency bound.
+
+The deployment artifact records the exact release ID, image, version, API origin,
+alias, existing public base URL and a `preview` configuration binding. Before cutover,
+connect privately to the preview's `/mcp/` endpoint and complete DCR, consent,
+Cognito login/callback, private OAuth refresh/
+revocation, one harmless READY upload with authorized read-back, slow-storage and
+uncertain-write checks, bounded cold/warm latency tests, the real managed streaming
+envelope/cookie/query/origin checks and a rollback exercise. All preview OAuth flows
+remain on the preview origin and new client; the production redirect allowlist is
+never broadened. Preview OAuth table collections and derived signing/encryption
+keys are isolated from production sessions. Storage acceptance uses unique harmless
+preview filenames because both functions retain the same owner-scoped document
+contract. Never fabricate private acceptance.
+
+For action `cutover`, supply the successful canary `source_run_id` and nonsecret
+`acceptance_json` containing `release_id`, UTC `observed_at`, an `evidence_path`,
+all keys in `scripts/serverless.py:CHECKS` set to `true`, and the exact `preview`
+object from the canary artifact. That binding contains the preview URL, client ID,
+Lambda version, image, release ID and distribution ID. The script rejects stale/
+incomplete evidence or any release/preview configuration differing from the current
+deployed stacks. Preparation and cutover use the same tested image digest; final
+production configuration retains its existing issuer, client and public URL.
+The workflow saves the current edge origin/path before updating the existing
+distribution to the Regional API with `/live` OriginPath. It runs one public boundary
+check afterward. This check alone does not prove private acceptance.
+
+For action `rollback`, set `source_run_id` to the cutover run that contains the saved
+origin artifact. The script restores only that origin/path on the same distribution.
+Artifacts are uploaded even when a cutover fails so rollback remains available.
+Never repeat a timed-out write merely because the caller did not receive a receipt.
+
+AWS references checked 2026-11-01:
+[REST Lambda response streaming](https://docs.aws.amazon.com/apigateway/latest/developerguide/response-transfer-mode-lambda.html),
+[HTTP API quotas](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-quotas.html),
+and [Lambda Web Adapter](https://github.com/aws/aws-lambda-web-adapter).
+
+## Existing ECS deployment and rollback
+
 This private repository, `gopalcb/markdown-mcp-service`, owns its image, service,
 application infrastructure, dedicated CloudFront endpoint and GitHub deployment workflow. It uses the existing
 `softrobots-systems` ECS cluster in account `249766001220`, region `ca-central-1`.
@@ -177,17 +246,14 @@ No NAT gateway or cluster is created. Consult current [Fargate rates](https://aw
 [load-balancer rates](https://aws.amazon.com/elasticloadbalancing/pricing/).
 This single-task configuration is not highly available.
 
-Cleanup is a separate explicitly authorized main-branch CI task using this
-repository's deployment identity. After checking active clients, execute:
-
-```bash
-# Delete the dedicated edge and wait for completion before removing its origin.
-aws cloudformation delete-stack --region ca-central-1 --stack-name markdown-mcp-service-edge
-aws ecs delete-express-gateway-service --region ca-central-1 \
-  --service-arn arn:aws:ecs:ca-central-1:249766001220:service/softrobots-systems/markdown-mcp-service
-# After service deletion completes:
-aws cloudformation delete-stack --region ca-central-1 --stack-name markdown-mcp-service
-```
+For serverless migration retirement, delete only the exact owned ECS Express
+service through a reviewed GitHub CI task after private production acceptance,
+rollback evidence, an agreed observation window and dependency/read-back checks.
+Do not delete `markdown-mcp-service-edge` or `markdown-mcp-service`: the former owns
+the permanent public URL and the latter owns Cognito, ECR, OAuth state and key
+resources that Lambda still uses. Inventory Express-managed load balancer, network
+and role dependencies before removing any unused resources. Cluster and portal
+service ownership remains outside this service's cleanup scope.
 
 Existing documents, versions, the index, cluster and portal services are retained.
 ECR is retained intentionally and continues accruing storage charges until separately

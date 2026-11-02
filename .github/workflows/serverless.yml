@@ -1,0 +1,133 @@
+name: Test and migrate Markdown MCP to Lambda
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Deploy a canary, switch the existing edge after acceptance, or restore a saved origin
+        type: choice
+        options: [deploy, cutover, rollback]
+        default: deploy
+      source_run_id:
+        description: Successful canary run for cutover; cutover run containing saved origin for rollback
+        type: string
+      acceptance_json:
+        description: Nonsecret revision-bound acceptance evidence JSON required for cutover
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: markdown-mcp-serverless-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  AWS_REGION: ca-central-1
+  AWS_DEFAULT_REGION: ca-central-1
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with: {python-version: '3.12'}
+      - run: python -m pip install -r requirements.txt -r requirements-client.txt pytest==9.1.1 cfn-lint==1.58.0
+      - run: python -m pytest -q tests scripts/tests
+      - run: cfn-lint aws-infrastructure/serverless.yaml aws-infrastructure/edge.yaml aws-infrastructure/delivery.yaml
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: Dockerfile.lambda
+          platforms: linux/amd64
+          load: true
+          tags: markdown-mcp-service:lambda-test
+          provenance: false
+      - name: Validate Lambda image imports and adapter permissions
+        run: docker run --rm -e MCP_ENABLED=false --entrypoint python markdown-mcp-service:lambda-test -c 'import os; assert os.getuid() != 0; assert os.access("/opt/extensions/lambda-adapter", os.X_OK); import fastmcp, app'
+      - name: Exercise the pinned adapter against a disposable local Lambda Runtime API
+        run: MCP_LAMBDA_TEST_IMAGE=markdown-mcp-service:lambda-test python -m pytest -q scripts/tests/test_lambda_adapter.py
+      - name: Export tested image
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'deploy'
+        run: docker save -o /tmp/markdown-mcp-lambda.tar markdown-mcp-service:lambda-test
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: github.event_name == 'workflow_dispatch' && inputs.action == 'deploy'
+        with:
+          name: markdown-mcp-lambda-image-${{ github.run_id }}
+          path: /tmp/markdown-mcp-lambda.tar
+          retention-days: 1
+          compression-level: 0
+
+  migrate:
+    needs: validate
+    if: github.repository == 'gopalcb/markdown-mcp-service' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with: {python-version: '3.12'}
+      - run: python -m pip install -r requirements.txt
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd
+        with:
+          aws-region: ca-central-1
+          role-to-assume: arn:aws:iam::249766001220:role/markdown-mcp-service-github-role
+          role-session-name: MarkdownMcpLambda-${{ github.run_id }}-${{ github.run_attempt }}
+          allowed-account-ids: '249766001220'
+          unset-current-credentials: true
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        if: inputs.action == 'deploy'
+        with:
+          name: markdown-mcp-lambda-image-${{ github.run_id }}
+          path: /tmp/mcp-image
+      - name: Publish tested Lambda image and prepare isolated preview and production configuration
+        if: inputs.action == 'deploy'
+        env:
+          RELEASE_TAG: lambda-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          registry=249766001220.dkr.ecr.ca-central-1.amazonaws.com
+          image="$registry/markdown-mcp-service:$RELEASE_TAG"
+          docker load -i /tmp/mcp-image/markdown-mcp-lambda.tar
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$registry"
+          trap 'docker logout "$registry" >/dev/null' EXIT
+          docker tag markdown-mcp-service:lambda-test "$image"
+          docker push "$image"
+          digest=$(aws ecr describe-images --repository-name markdown-mcp-service --image-ids imageTag="$RELEASE_TAG" --query 'imageDetails[0].imageDigest' --output text)
+          python scripts/serverless.py deploy --image "$registry/markdown-mcp-service@$digest"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131
+        if: inputs.action != 'deploy'
+        with:
+          name: markdown-mcp-serverless-${{ inputs.source_run_id }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: /tmp
+      - name: Switch existing edge after recorded acceptance or restore saved origin
+        if: inputs.action != 'deploy'
+        env:
+          MIGRATION_ACTION: ${{ inputs.action }}
+          ACCEPTANCE_JSON: ${{ inputs.acceptance_json }}
+        run: |
+          python -c 'import os,pathlib; pathlib.Path("/tmp/markdown-mcp-acceptance.json").write_text(os.environ["ACCEPTANCE_JSON"])'
+          python scripts/serverless.py "$MIGRATION_ACTION" --acceptance /tmp/markdown-mcp-acceptance.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: markdown-mcp-serverless-${{ github.run_id }}
+          path: |
+            /tmp/markdown-mcp-serverless.json
+            /tmp/markdown-mcp-serverless-result.json
+            /tmp/markdown-mcp-edge-rollback.json
+          retention-days: 30
+          if-no-files-found: warn

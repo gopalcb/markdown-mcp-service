@@ -10,8 +10,8 @@ files:
       create_app:
         summary: Construct isolated SDK lifecycle and dependencies for production or fixture tests.
       create_app.save_markdown:
-        summary: Save Markdown to Work Organizer. Same group/name replaces the latest bytes and retains one document
-          ID; partial batches are not atomic. Do not retry unverified files blindly.
+        summary: Save Markdown to Work Organizer. Same group/name replaces the latest bytes and retains
+          one document ID; partial batches are not atomic. Do not retry unverified files blindly.
       create_app.lifespan:
         summary: Run the SDK session manager for the lifetime of the ASGI worker.
       create_app.health:
@@ -19,118 +19,89 @@ files:
       create_app.protected_resource:
         summary: Advertise the exact resource and the adapter authorization server.
   mcp_services/__init__.py:
-    purpose: Authentication, validation and storage adapters for the Markdown MCP
-      boundary.
+    purpose: Authentication, validation and storage adapters for the Markdown MCP boundary.
     functions: {}
   mcp_services/auth_service.py:
-    purpose: Fail-closed Cognito verification and bounded ASGI ingress without credential
-      logging.
+    purpose: Fail-closed Cognito verification and bounded ASGI ingress without credential logging.
     functions:
       verify_access_token:
-        summary: Verify Cognito identity and client; require audience for direct resource
-          tokens.
+        summary: Verify Cognito identity and client; require audience for direct resource tokens.
       IngressMiddleware.__init__:
         summary: Keep a bounded global token bucket and injected token verifier.
       IngressMiddleware.__call__:
-        summary: Authenticate once and replay only a fully bounded request to the
-          SDK.
+        summary: Authenticate once and replay only a fully bounded request to the SDK.
       IngressMiddleware.__call__.bounded_receive:
-        summary: Deliver the checked bytes once, preserving subsequent disconnect
-          events.
+        summary: Deliver the checked bytes once, preserving subsequent disconnect events.
       OAuthIngressMiddleware.__init__:
-        summary: Keep a separate small OAuth request budget and the explicit public/origin
-          hosts.
+        summary: Keep a separate small OAuth request budget and the explicit public/origin hosts.
       OAuthIngressMiddleware.__call__:
-        summary: Reject oversized or cross-origin OAuth requests before parsing or
-          persistence.
+        summary: Reject oversized or cross-origin OAuth requests before parsing or persistence.
       OAuthIngressMiddleware.__call__.bounded_receive:
         summary: Replay the bounded OAuth body once without retaining unbounded input.
       OAuthIngressMiddleware.__call__.private_send:
         summary: Keep authorization query data out of browser caches and referrers.
   mcp_services/oauth_service.py:
-    purpose: Bridge ChatGPT OAuth to Cognito without exposing upstream tokens to the
-      client.
+    purpose: Bridge ChatGPT OAuth to Cognito without exposing upstream tokens to the client.
     functions:
       CognitoVerifier.__init__:
         summary: Set required scopes and a bounded JWKS fetcher, or fixture key source.
       CognitoVerifier.verify_token:
         summary: Verify Cognito before issuing or accepting any proxy authorization.
       MarkdownOAuthProxy.__init__:
-        summary: Use shared atomic redemption storage alongside the encrypted library
-          store.
+        summary: Use shared atomic redemption storage alongside the encrypted library store.
       MarkdownOAuthProxy.register_client:
-        summary: Reject userinfo and ambiguous redirects before applying library DCR
-          policy.
+        summary: Reject userinfo and ambiguous redirects before applying library DCR policy.
       MarkdownOAuthProxy.exchange_authorization_code:
-        summary: Claim a code atomically after the SDK validates client, redirect
-          and PKCE.
+        summary: Claim a code atomically after the SDK validates client, redirect and PKCE.
       MarkdownOAuthProxy.exchange_refresh_token:
-        summary: Permit only one use of a rotating proxy refresh token across all
-          tasks.
+        summary: Permit only one use of a rotating proxy refresh token across all tasks.
       MarkdownOAuthProxy.load_access_token:
-        summary: Keep downstream token/client identity for client-bound revocation
-          checks.
+        summary: Keep downstream token/client identity for client-bound revocation checks.
       MarkdownOAuthProxy.verify_claims:
-        summary: Adapt verified proxy tokens to the existing authenticated ingress
-          contract.
+        summary: Adapt verified proxy tokens to the existing authenticated ingress contract.
       MarkdownOAuthProxy.revoke_token:
-        summary: Invalidate all tokens in the local session and revoke the upstream
-          refresh token.
+        summary: Invalidate all tokens in the local session and revoke the upstream refresh token.
       MarkdownOAuthProxy.session_revoked:
-        summary: Check the shared tombstone so racing refreshes cannot resurrect a
-          revoked session.
+        summary: Check the shared tombstone so racing refreshes cannot resurrect a revoked session.
       MarkdownOAuthProxy.revoke_public_client:
-        summary: Accept RFC 7009 public clients without the SDK's erroneously required
-          secret field.
+        summary: Accept RFC 7009 public clients without the SDK's erroneously required secret field.
       MarkdownOAuthProxy.get_routes:
-        summary: Retain maintained OAuth routes and replace only the public-client
-          revocation bug.
+        summary: Retain maintained OAuth routes and replace only the public-client revocation bug.
       create_oauth:
-        summary: Build the maintained adapter with a persistent key and encrypted
-          shared state.
+        summary: Build the adapter with persistent state and a separately derived preview key.
   mcp_services/oauth_storage.py:
-    purpose: Persist encrypted OAuth state with strong reads and atomic redemption
-      claims.
+    purpose: Persist encrypted OAuth state with strong reads and atomic redemption claims.
     functions:
       OAuthStateStore.__init__:
-        summary: Use an injected low-level client; never create resources at runtime.
+        summary: Use a provisioned table and optional isolated preview collection namespace.
       OAuthStateStore.item_key:
-        summary: Hash keys so authorization codes and client identifiers are not stored
-          raw.
+        summary: Hash keys so authorization codes and client identifiers are not stored raw.
       OAuthStateStore._get_managed_entry:
-        summary: Implement the library hook with a strongly consistent, expiry-checked
-          read.
+        summary: Implement the library hook with a strongly consistent, expiry-checked read.
       OAuthStateStore._put_managed_entry:
-        summary: Implement the library hook; expire otherwise permanent client records
-          after 90 days.
+        summary: Implement the library hook; expire otherwise permanent client records after 90 days.
       OAuthStateStore._delete_managed_entry:
         summary: Implement the library hook and return whether a record actually existed.
       OAuthStateStore.claim_once:
-        summary: Atomically claim a validated grant across overlapping tasks; never
-          retry redemption.
+        summary: Atomically claim a validated grant across overlapping tasks; never retry redemption.
   mcp_services/storage_service.py:
     purpose: Adapt validated MCP input to the exact production document storage service.
     functions:
       write_documents:
-        summary: Use task-role credentials and no automatic write retries; always
-          close clients.
+        summary: Use task-role credentials and no automatic write retries; always close clients.
       save_batch:
-        summary: Report saved versus uncertain outcomes only after the shared READY
-          transition.
+        summary: Report saved versus uncertain outcomes only after the shared READY transition.
   mcp_services/validation_service.py:
     purpose: Validate deployment settings and whole Markdown batches before storage.
     functions:
       Metadata.validate_path:
         summary: Accept only safe slash-separated segments.
       prepare_payload:
-        summary: Validate every byte and destination before producing the shared storage
-          contract.
+        summary: Validate every byte and destination before producing the shared storage contract.
       load_config:
-        summary: Fail startup for incomplete enabled configurations; permit deny-all
-          bootstrap.
+        summary: Fail startup for incomplete enabled configurations; permit deny-all bootstrap.
       valid_oauth_redirect:
-        summary: Allow only literal ChatGPT callback paths or local native callback
-          origins.
+        summary: Allow only literal ChatGPT callback paths or local native callback origins.
   scripts/deploy.py:
     purpose: Provision and deploy only Markdown MCP through the main-branch GitHub role.
     functions:
@@ -216,20 +187,17 @@ files:
     purpose: Emit structured operational events without document bodies or metadata.
     functions:
       log_event:
-        summary: Write only identifiers and safe error types to Lambda's CloudWatch
-          stream.
+        summary: Write only identifiers and safe error types to Lambda's CloudWatch stream.
   services/s3_service.py:
     purpose: Write latest private Markdown bytes with source-bound conditional S3 writes.
     functions:
       store_document:
         summary: Acknowledge one conditional write; reject collisions and never require a version ID.
   tests/test_langchain.py:
-    purpose: Verify the optional LangChain client against the authenticated ASGI MCP
-      boundary.
+    purpose: Verify the optional LangChain client against the authenticated ASGI MCP boundary.
     functions:
       test_langchain_discovery_and_receipts:
-        summary: Adapt real HTTP tools and retain per-file results without a model
-          or cloud write.
+        summary: Adapt real HTTP tools and retain per-file results without a model or cloud write.
       test_langchain_discovery_and_receipts.client_factory:
         summary: Keep every client request inside the fixture ASGI application.
       test_langchain_discovery_and_receipts.exercise_adapter:
@@ -272,8 +240,7 @@ files:
       test_oauth_redirect_rejects_ambiguous_origins:
         summary: Do not let wildcard redirect patterns admit userinfo or attacker origins.
   tests/test_oauth.py:
-    purpose: Exercise the real OAuth adapter with signed Cognito fixtures and encrypted
-      shared state.
+    purpose: Exercise the real OAuth adapter with signed Cognito fixtures and encrypted shared state.
     functions:
       FakeDynamo.__init__:
         summary: Share records safely across ASGI threads and adapter instances.
@@ -284,62 +251,47 @@ files:
       FakeDynamo.delete_item:
         summary: Return the removed record as DynamoDB ALL_OLD does.
       oauth_setup:
-        summary: Build real adapter and fixture upstream endpoints, never making external
-          requests.
+        summary: Build real adapter and fixture upstream endpoints, never making external requests.
       oauth_setup.fetch_token:
-        summary: Emulate Cognito code exchange while checking dedicated-client PKCE
-          binding.
+        summary: Emulate Cognito code exchange while checking dedicated-client PKCE binding.
       oauth_setup.refresh_token:
-        summary: Return a fresh Cognito token without audience and record refresh
-          use.
+        summary: Return a fresh Cognito token without audience and record refresh use.
       oauth_setup.revoke:
         summary: Accept only the expected private Cognito refresh-token revocation.
       register:
         summary: Register a public DCR client through the actual SDK endpoint.
       begin_consent:
-        summary: Follow authorization to the consent form and recover only fixture
-          hidden fields.
+        summary: Follow authorization to the consent form and recover only fixture hidden fields.
       authorize:
-        summary: Approve real consent and emulate the upstream browser callback with
-          cookies intact.
+        summary: Approve real consent and emulate the upstream browser callback with cookies intact.
       exchange:
         summary: Exchange a downstream code at the real public-client token endpoint.
       tool_list:
         summary: Use the issued reference token on the actual stateless MCP transport.
       test_oauth_exchange_restart_refresh_revoke:
-        summary: Run DCR, consent, PKCE, encrypted restart, rotating refresh and session
-          revocation.
+        summary: Run DCR, consent, PKCE, encrypted restart, rotating refresh and session revocation.
       test_consent_state_redirect_and_csrf_fail_closed:
-        summary: Reject malicious redirects, unbound callbacks, wrong state and missing
-          consent CSRF.
+        summary: Reject malicious redirects, unbound callbacks, wrong state and missing consent CSRF.
       test_upstream_authorization_failure_cannot_mint_tokens:
-        summary: Reject correctly signed Cognito tokens that fail any required authorization
-          binding.
+        summary: Reject correctly signed Cognito tokens that fail any required authorization binding.
       test_concurrent_code_exchange_and_expiry:
-        summary: Permit one redemption across two independently created adapters sharing
-          DynamoDB.
+        summary: Permit one redemption across two independently created adapters sharing DynamoDB.
       test_revocation_and_refresh_are_bound_to_registered_client:
-        summary: A second public client cannot refresh or invalidate another client's
-          session.
+        summary: A second public client cannot refresh or invalidate another client's session.
       test_oauth_ingress_bounds_host_origin_and_private_response_headers:
-        summary: Reject hostile OAuth inputs before persistence and keep normal responses
-          private.
+        summary: Reject hostile OAuth inputs before persistence and keep normal responses private.
       test_consent_origin_rejection_preserves_valid_transaction:
-        summary: Reject foreign or opaque consent even with valid CSRF; allow the
-          real page origin.
+        summary: Reject foreign or opaque consent even with valid CSRF; allow the real page origin.
       test_upstream_callback_exception_does_not_expose_sensitive_detail:
-        summary: Replace upstream failure HTML with a generic private error without
-          credentials.
+        summary: Replace upstream failure HTML with a generic private error without credentials.
       test_upstream_callback_exception_does_not_expose_sensitive_detail.failed_exchange:
         summary: Raise a sensitive fixture diagnostic at the external token boundary.
       test_revoke_during_refresh_cannot_resurrect_session:
-        summary: A shared revocation tombstone defeats an overlapping upstream refresh
-          write.
+        summary: A shared revocation tombstone defeats an overlapping upstream refresh write.
       test_revoke_during_refresh_cannot_resurrect_session.paused_refresh:
         summary: Pause the upstream response while another task revokes the session.
       test_runtime_startup_reads_key_with_actual_boto_client:
-        summary: Exercise production startup with a stubbed real boto client, which
-          has no context protocol.
+        summary: Exercise production startup with a stubbed real boto client, which has no context protocol.
   tests/test_storage_contract.py:
     purpose: Protect independently maintained compact storage and conditional overwrite contracts.
     functions:
@@ -365,3 +317,73 @@ files:
         summary: Read, write and publication errors preserve honest independent per-file outcomes.
       test_missing_index_acknowledgement_cannot_report_ready:
         summary: An empty DynamoDB update response never fabricates a successful receipt.
+  scripts/serverless.py:
+    purpose: Deploy the parallel MCP Lambda through GitHub and switch the existing edge explicitly.
+    functions:
+      outputs:
+        summary: Extract only nonsecret CloudFormation output values from a complete stack.
+      apply_stack:
+        summary: Issue one stack update and use the existing two-minute completion checks.
+      check_concurrency:
+        summary: Fail before mutation if the region cannot reserve the bounded function budget.
+      verify_image_access:
+        summary: Require pre-applied exact-function ECR access without changing production resources.
+      deploy_lambda:
+        summary: Deploy an immutable Lambda canary without changing the production edge origin.
+      preview_binding:
+        summary: Bind private preview evidence to the exact URL, client, version and image.
+      validate_acceptance:
+        summary: Require complete, recent, revision-bound evidence before an origin switch.
+      edge_origin:
+        summary: Read the exact origin/path saved in the owned CloudFormation stack parameters.
+      switch_origin:
+        summary: Switch only the existing edge stack, accepting exact regional ECS/API targets.
+      main:
+        summary: Run an explicitly selected CI stage and persist nonsecret revision evidence.
+  scripts/tests/test_serverless.py:
+    purpose: Protect serverless migration boundaries, revision evidence and finite slow writes.
+    functions:
+      test_streaming_stack_preserves_existing_identity_and_bounds_ingress:
+        summary: Use Regional streaming REST with bounded capacity and no recreated identity/data.
+      test_acceptance_is_complete_recent_and_revision_bound:
+        summary: Neither a health check nor stale evidence can approve production cutover.
+      test_insufficient_concurrency_fails_without_mutation:
+        summary: The regional minimum unreserved budget must survive the requested reservation.
+      test_edge_switch_rejects_foreign_host_and_distribution:
+        summary: Only the exact saved distribution and regional service origins can be used.
+      test_api_origin_validation_is_literal_and_regional:
+        summary: An API origin Host is allowed without admitting foreign hosts or forwarded identity.
+      test_cancelled_tool_may_finish_write_and_requires_reconciliation:
+        summary: Prove cancellation cannot undo a running storage thread or confirm its receipt.
+      test_cancelled_tool_may_finish_write_and_requires_reconciliation.slow_write:
+        summary: Hold a representative in-flight storage acknowledgement past cancellation.
+      test_cancelled_tool_may_finish_write_and_requires_reconciliation.cancel_request:
+        summary: Cancel the requester while preserving bounded cleanup of its storage worker.
+      test_delivery_policy_remains_within_inline_limit:
+        summary: Keep IAM snapshot parity and the documented aggregate inline-policy size bound.
+      test_prepare_deploys_isolated_preview_without_mutating_production_edge:
+        summary: Prepare two configurations with one image while preserving production identity.
+      test_preview_oauth_state_and_keys_are_isolated_from_production:
+        summary: Preview registrations, redemption and signing cannot share production sessions.
+      test_preview_dcr_and_consent_bind_only_preview_client_and_callback:
+        summary: Exercise preview consent through HTTP and reject its registration in production.
+      test_ecr_preflight_requires_both_exact_lambda_functions:
+        summary: Preparation reads its prerequisite without editing the production stack or client.
+  scripts/tests/test_lambda_adapter.py:
+    purpose: Exercise the pinned adapter binary using a local disposable Lambda Runtime API.
+    functions:
+      RuntimeHandler.log_message:
+        summary: Keep request paths and synthetic payloads out of test output.
+      RuntimeHandler.do_GET:
+        summary: Deliver queued invocations with the mandatory Runtime API context headers.
+      RuntimeHandler.do_POST:
+        summary: Decode chunked streaming bytes without interpreting application content.
+      rest_event:
+        summary: Build the REST API proxy input that the streaming integration actually sends.
+      test_real_adapter_rest_stream_envelope_cookies_and_proxy_mapping:
+        summary: Verify the real binary emits eight-null metadata framing and distinct cookies.
+  scripts/tests/adapter_app.py:
+    purpose: Add a disposable transport probe to the deny-all production app for Docker tests.
+    functions:
+      adapter_contract:
+        summary: Echo synthetic transport values and two cookies without touching AWS storage.

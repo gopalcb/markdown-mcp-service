@@ -1,5 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Independent GitHub deployment identity for Markdown MCP on the existing Softrobots cluster.
+Description: Independent GitHub deployment identity for Markdown MCP on the existing
+  Softrobots cluster.
 Resources:
   DeploymentRole:
     Type: AWS::IAM::Role
@@ -29,16 +30,14 @@ Resources:
             - cloudformation:UpdateStack
             - cloudformation:DeleteStack
             Resource:
-            - arn:aws:cloudformation:ca-central-1:249766001220:stack/markdown-mcp-service/*
-            - arn:aws:cloudformation:ca-central-1:249766001220:stack/markdown-mcp-service-edge/*
+            - arn:aws:cloudformation:ca-central-1:249766001220:stack/markdown-mcp-service*/*
           - Sid: ReadMcpStack
             Effect: Allow
             Action:
             - cloudformation:DescribeStacks
             - cloudformation:DescribeStackEvents
             Resource:
-            - arn:aws:cloudformation:ca-central-1:249766001220:stack/markdown-mcp-service/*
-            - arn:aws:cloudformation:ca-central-1:249766001220:stack/markdown-mcp-service-edge/*
+            - arn:aws:cloudformation:ca-central-1:249766001220:stack/markdown-mcp-service*/*
           - Sid: PassMcpRuntimeRoles
             Effect: Allow
             Action: iam:PassRole
@@ -97,11 +96,14 @@ Resources:
             Resource:
             - arn:aws:iam::249766001220:role/markdown-mcp-service-task-role
             - arn:aws:iam::249766001220:role/markdown-mcp-service-execution-role
+            - arn:aws:iam::249766001220:role/markdown-mcp-service-lambda-role
           - Sid: ManageOnlyMcpRepository
             Effect: Allow
             Action:
             - ecr:CreateRepository
             - ecr:DescribeRepositories
+            - ecr:GetRepositoryPolicy
+            - ecr:SetRepositoryPolicy
             - ecr:PutImageTagMutability
             - ecr:PutImageScanningConfiguration
             - ecr:TagResource
@@ -121,6 +123,8 @@ Resources:
             Resource:
             - arn:aws:logs:ca-central-1:249766001220:log-group:/markdown-mcp-service
             - arn:aws:logs:ca-central-1:249766001220:log-group:/markdown-mcp-service:*
+            - arn:aws:logs:ca-central-1:249766001220:log-group:/aws/lambda/markdown-mcp-service*
+            - arn:aws:logs:ca-central-1:249766001220:log-group:/aws/lambda/markdown-mcp-service*:*
           - Sid: DescribeLogs
             Effect: Allow
             Action: logs:DescribeLogGroups
@@ -277,6 +281,62 @@ Resources:
             Effect: Allow
             Action: secretsmanager:GetSecretValue
             Resource: arn:aws:secretsmanager:ca-central-1:249766001220:secret:markdown-mcp-service-oauth-key-??????
+            Condition:
+              ForAnyValue:StringEquals:
+                aws:CalledVia:
+                - cloudformation.amazonaws.com
+          - Sid: PassMcpLambdaRole
+            Effect: Allow
+            Action: iam:PassRole
+            Resource: arn:aws:iam::249766001220:role/markdown-mcp-service-lambda-role
+            Condition:
+              StringEquals:
+                iam:PassedToService: lambda.amazonaws.com
+          - Sid: ManageMcpLambda
+            Effect: Allow
+            Action:
+            - lambda:CreateFunction
+            - lambda:UpdateFunctionCode
+            - lambda:UpdateFunctionConfiguration
+            - lambda:GetFunction
+            - lambda:GetFunctionConfiguration
+            - lambda:DeleteFunction
+            - lambda:PublishVersion
+            - lambda:CreateAlias
+            - lambda:GetAlias
+            - lambda:UpdateAlias
+            - lambda:DeleteAlias
+            - lambda:AddPermission
+            - lambda:RemovePermission
+            - lambda:GetPolicy
+            - lambda:PutFunctionConcurrency
+            - lambda:DeleteFunctionConcurrency
+            - lambda:GetFunctionConcurrency
+            - lambda:TagResource
+            - lambda:UntagResource
+            - lambda:ListTags
+            - lambda:ListVersionsByFunction
+            Resource:
+            - arn:aws:lambda:ca-central-1:249766001220:function:markdown-mcp-service
+            - arn:aws:lambda:ca-central-1:249766001220:function:markdown-mcp-service:*
+            - arn:aws:lambda:ca-central-1:249766001220:function:markdown-mcp-service-preview
+            - arn:aws:lambda:ca-central-1:249766001220:function:markdown-mcp-service-preview:*
+          - Sid: ReadLambdaCapacity
+            Effect: Allow
+            Action: lambda:GetAccountSettings
+            Resource: '*'
+          - Sid: ManageMcpRestApiViaCloudFormation
+            Effect: Allow
+            Action:
+            - apigateway:GET
+            - apigateway:POST
+            - apigateway:PUT
+            - apigateway:PATCH
+            - apigateway:DELETE
+            Resource:
+            - arn:aws:apigateway:ca-central-1::/restapis
+            - arn:aws:apigateway:ca-central-1::/restapis/*
+            - arn:aws:apigateway:ca-central-1::/tags/*
             Condition:
               ForAnyValue:StringEquals:
                 aws:CalledVia:

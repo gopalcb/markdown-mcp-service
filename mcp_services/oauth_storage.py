@@ -14,17 +14,20 @@ from key_value.aio.stores.base import BaseStore
 class OAuthStateStore(BaseStore):
     """Adapt the provisioned DynamoDB table to the OAuth library's store contract."""
 
-    def __init__(self, client, table_name: str):
-        """Use an injected low-level client; never create resources at runtime."""
+    def __init__(self, client, table_name: str, namespace: str = ''):
+        """Use a provisioned table and optional isolated preview collection namespace."""
         super().__init__()
         self.client = client
         self.table_name = table_name
+        self.namespace = namespace
         self.serializer = BasicSerializationAdapter()
 
     def item_key(self, collection: str, key: str) -> dict:
         """Hash keys so authorization codes and client identifiers are not stored raw."""
         return {
-            'collection': {'S': collection},
+            'collection': {
+                'S': self.namespace + ':' + collection if self.namespace else collection
+            },
             'key': {'S': hashlib.sha256(key.encode()).hexdigest()},
         }
 

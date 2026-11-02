@@ -1,0 +1,285 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Parallel Markdown MCP Lambda and Regional streaming REST API; existing ECS, CloudFront, Cognito and data remain owned by their stacks.
+Parameters:
+  DeploymentMode:
+    Type: String
+    Default: production
+    AllowedValues: [production, preview]
+  RuntimeRoleArn:
+    Type: String
+    Default: arn:aws:iam::249766001220:role/markdown-mcp-service-lambda-role
+    AllowedPattern: '^arn:aws:iam::249766001220:role/markdown-mcp-service-lambda-role$'
+  ImageUri:
+    Type: String
+    AllowedPattern: '^249766001220\.dkr\.ecr\.ca-central-1\.amazonaws\.com/markdown-mcp-service@sha256:[a-f0-9]{64}$'
+  ReleaseId:
+    Type: String
+    AllowedPattern: '^[a-f0-9]{64}$'
+  PublicBaseUrl:
+    Type: String
+    AllowedPattern: '^https://[a-z0-9]+\.cloudfront\.net$'
+  ClientId:
+    Type: String
+    AllowedPattern: '^[a-z0-9]+$'
+  AllowedSubject:
+    Type: String
+    AllowedPattern: '^[a-f0-9-]{36}$'
+  OAuthSecretArn:
+    Type: String
+    AllowedPattern: '^arn:aws:secretsmanager:ca-central-1:249766001220:secret:markdown-mcp-service-oauth-key-[A-Za-z0-9]{6}$'
+  ReservedConcurrency:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 10
+Conditions:
+  IsPreview: !Equals [!Ref DeploymentMode, preview]
+  IsProduction: !Equals [!Ref DeploymentMode, production]
+Resources:
+  Logs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !If [IsPreview, /aws/lambda/markdown-mcp-service-preview, /aws/lambda/markdown-mcp-service]
+      RetentionInDays: 7
+  Role:
+    Type: AWS::IAM::Role
+    Condition: IsProduction
+    Properties:
+      RoleName: markdown-mcp-service-lambda-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: MarkdownMcpRuntime
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/markdown-mcp-service*:*'
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject]
+                Resource: arn:aws:s3:::agent-work-history--249766001220-ca-central-1/agent-work/raw-markdown/gopalcbala/*
+              - Effect: Deny
+                Action: [s3:DeleteObject, s3:DeleteObjectVersion]
+                Resource: arn:aws:s3:::agent-work-history--249766001220-ca-central-1/*
+              - Effect: Allow
+                Action: [dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:GetItem]
+                Resource: arn:aws:dynamodb:ca-central-1:249766001220:table/softrobots-document-api-user-files
+                Condition:
+                  ForAllValues:StringEquals:
+                    dynamodb:LeadingKeys: [gopalcbala]
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:DeleteItem]
+                Resource: arn:aws:dynamodb:ca-central-1:249766001220:table/markdown-mcp-service-oauth
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref OAuthSecretArn
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !If [IsPreview, markdown-mcp-service-preview, markdown-mcp-service]
+      PackageType: Image
+      Code: {ImageUri: !Ref ImageUri}
+      Architectures: [x86_64]
+      Role: !If [IsPreview, !Ref RuntimeRoleArn, !GetAtt Role.Arn]
+      MemorySize: 1024
+      Timeout: 180
+      ReservedConcurrentExecutions: !Ref ReservedConcurrency
+      Environment:
+        Variables:
+          MCP_ENABLED: 'true'
+          PUBLIC_BASE_URL: !If [IsPreview, !Sub 'https://${PreviewDistribution.DomainName}', !Ref PublicBaseUrl]
+          MCP_RESOURCE: !If [IsPreview, !Sub 'https://${PreviewDistribution.DomainName}/mcp/', !Sub '${PublicBaseUrl}/mcp/']
+          MCP_ORIGIN_HOST: !Sub '${Api}.execute-api.${AWS::Region}.amazonaws.com'
+          MCP_WRITE_SCOPE: markdown-api/write
+          COGNITO_ISSUER: https://cognito-idp.ca-central-1.amazonaws.com/ca-central-1_VwnNJYce8
+          COGNITO_CLIENT_ID: !If [IsPreview, !Ref PreviewClient, !Ref ClientId]
+          COGNITO_DOMAIN: https://softrobots-usernames-249766001220.auth.ca-central-1.amazoncognito.com
+          ALLOWED_SUB: !Ref AllowedSubject
+          S3_BUCKET: agent-work-history--249766001220-ca-central-1
+          USER_FILES_TABLE: softrobots-document-api-user-files
+          OAUTH_STATE_TABLE: markdown-mcp-service-oauth
+          OAUTH_SECRET_ARN: !Ref OAuthSecretArn
+          OAUTH_STATE_NAMESPACE: !If [IsPreview, preview, '']
+      Tags:
+        - {Key: Project, Value: markdown-mcp-service-serverless}
+  Version:
+    Type: AWS::Lambda::Version
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !Ref Function
+      Description: !Ref ReleaseId
+  Alias:
+    Type: AWS::Lambda::Alias
+    Properties:
+      Name: live
+      FunctionName: !Ref Function
+      FunctionVersion: !GetAtt Version.Version
+  Api:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !If [IsPreview, markdown-mcp-service-preview, markdown-mcp-service-serverless]
+      EndpointConfiguration: {Types: [REGIONAL]}
+      Tags:
+        - {Key: Project, Value: markdown-mcp-service-serverless}
+  Proxy:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref Api
+      ParentId: !GetAtt Api.RootResourceId
+      PathPart: '{proxy+}'
+  RootMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref Api
+      ResourceId: !GetAtt Api.RootResourceId
+      HttpMethod: ANY
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2021-11-15/functions/${Alias}/response-streaming-invocations'
+        ResponseTransferMode: STREAM
+        TimeoutInMillis: 180000
+  ProxyMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref Api
+      ResourceId: !Ref Proxy
+      HttpMethod: ANY
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2021-11-15/functions/${Alias}/response-streaming-invocations'
+        ResponseTransferMode: STREAM
+        TimeoutInMillis: 180000
+  Deployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: [RootMethod, ProxyMethod]
+    Properties:
+      RestApiId: !Ref Api
+      Description: !Ref ReleaseId
+  Stage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref Api
+      DeploymentId: !Ref Deployment
+      StageName: live
+      MethodSettings:
+        - ResourcePath: /*
+          HttpMethod: '*'
+          ThrottlingBurstLimit: 60
+          ThrottlingRateLimit: 1
+          MetricsEnabled: true
+          DataTraceEnabled: false
+      Tags:
+        - {Key: Project, Value: markdown-mcp-service-serverless}
+  Permission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref Alias
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*'
+      SourceAccount: !Ref AWS::AccountId
+  PreviewDistribution:
+    Type: AWS::CloudFront::Distribution
+    Condition: IsPreview
+    Properties:
+      Tags:
+        - {Key: Project, Value: markdown-mcp-service-edge}
+        - {Key: DeploymentPurpose, Value: preview}
+      DistributionConfig:
+        Comment: Isolated Markdown MCP Lambda OAuth preview
+        Enabled: true
+        IPV6Enabled: true
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        ViewerCertificate: {CloudFrontDefaultCertificate: true}
+        Origins:
+          - Id: PreviewApi
+            DomainName: !Sub '${Api}.execute-api.${AWS::Region}.amazonaws.com'
+            OriginPath: /live
+            ConnectionAttempts: 1
+            ConnectionTimeout: 10
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+              OriginSSLProtocols: [TLSv1.2]
+              OriginReadTimeout: 60
+              OriginKeepaliveTimeout: 5
+        DefaultCacheBehavior:
+          TargetOriginId: PreviewApi
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+          CachedMethods: [GET, HEAD]
+          Compress: false
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+        CustomErrorResponses:
+          - {ErrorCode: 400, ErrorCachingMinTTL: 0}
+          - {ErrorCode: 403, ErrorCachingMinTTL: 0}
+          - {ErrorCode: 404, ErrorCachingMinTTL: 0}
+          - {ErrorCode: 405, ErrorCachingMinTTL: 0}
+          - {ErrorCode: 414, ErrorCachingMinTTL: 0}
+          - {ErrorCode: 416, ErrorCachingMinTTL: 0}
+          - {ErrorCode: 500, ErrorCachingMinTTL: 0}
+          - {ErrorCode: 501, ErrorCachingMinTTL: 0}
+          - {ErrorCode: 502, ErrorCachingMinTTL: 0}
+          - {ErrorCode: 503, ErrorCachingMinTTL: 0}
+          - {ErrorCode: 504, ErrorCachingMinTTL: 0}
+  PreviewClient:
+    Type: AWS::Cognito::UserPoolClient
+    Condition: IsPreview
+    Properties:
+      UserPoolId: ca-central-1_VwnNJYce8
+      ClientName: markdown-mcp-service-preview
+      GenerateSecret: false
+      EnableTokenRevocation: true
+      PreventUserExistenceErrors: ENABLED
+      ExplicitAuthFlows: [ALLOW_USER_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, markdown-api/write]
+      CallbackURLs: [!Sub 'https://${PreviewDistribution.DomainName}/auth/callback']
+      SupportedIdentityProviders: [COGNITO]
+      AccessTokenValidity: 5
+      IdTokenValidity: 5
+      RefreshTokenValidity: 90
+      TokenValidityUnits: {AccessToken: minutes, IdToken: minutes, RefreshToken: days}
+  PreviewBranding:
+    Type: AWS::Cognito::ManagedLoginBranding
+    Condition: IsPreview
+    Properties:
+      UserPoolId: ca-central-1_VwnNJYce8
+      ClientId: !Ref PreviewClient
+      UseCognitoProvidedValues: true
+Outputs:
+  PublicBaseUrl:
+    Value: !If [IsPreview, !Sub 'https://${PreviewDistribution.DomainName}', !Ref PublicBaseUrl]
+  ClientId:
+    Value: !If [IsPreview, !Ref PreviewClient, !Ref ClientId]
+  RuntimeRoleArn:
+    Value: !If [IsPreview, !Ref RuntimeRoleArn, !GetAtt Role.Arn]
+  PreviewDistributionId:
+    Condition: IsPreview
+    Value: !Ref PreviewDistribution
+  ReleaseId:
+    Value: !Ref ReleaseId
+  ImageUri:
+    Value: !Ref ImageUri
+  Origin:
+    Value: !Sub 'https://${Api}.execute-api.${AWS::Region}.amazonaws.com'
+  OriginPath:
+    Value: /live
+  FunctionArn:
+    Value: !GetAtt Function.Arn
+  AliasArn:
+    Value: !Ref Alias
+  Version:
+    Value: !GetAtt Version.Version
