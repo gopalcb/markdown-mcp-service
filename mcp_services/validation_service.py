@@ -129,10 +129,11 @@ def load_config() -> dict:
     if origin_host:
         if not re.fullmatch(
             r'(?:[a-z0-9-]+\.ecs\.ca-central-1\.on\.aws|'
-            r'[a-z0-9]+\.execute-api\.ca-central-1\.amazonaws\.com)',
+            r'[a-z0-9]+\.execute-api\.ca-central-1\.amazonaws\.com|'
+            r'[a-z0-9]+\.lambda-url\.ca-central-1\.on\.aws)',
             origin_host,
         ):
-            raise ValueError('MCP_ORIGIN_HOST must be the explicit regional ECS or API hostname')
+            raise ValueError('MCP_ORIGIN_HOST must be the explicit regional ECS, API, or Lambda URL hostname')
         config['MCP_ORIGIN_HOST'] = origin_host
     return config
 

@@ -25,7 +25,7 @@ SPEC.loader.exec_module(serverless)
 
 
 def test_streaming_stack_preserves_existing_identity_and_bounds_ingress() -> None:
-    """Use Regional streaming REST with bounded capacity and no recreated identity/data."""
+    """Use one streaming Function URL with bounded capacity and no recreated identity/data."""
     loader = type('TemplateLoader', (yaml.SafeLoader,), {})
     loader.add_multi_constructor('!', lambda loader, tag, node: None)
     template = yaml.load((ROOT / 'aws-infrastructure/serverless.yaml').read_text(), Loader=loader)
@@ -43,28 +43,24 @@ def test_streaming_stack_preserves_existing_identity_and_bounds_ingress() -> Non
     )
     assert sum(resource['Type'] == 'AWS::Lambda::Function' for resource in resources.values()) == 1
     assert not any(name.startswith('Preview') for name in resources)
-    assert resources['Api']['Properties']['EndpointConfiguration'] == {'Types': ['REGIONAL']}
-    for name in ('RootMethod', 'ProxyMethod'):
-        integration = resources[name]['Properties']['Integration']
-        assert integration['Type'] == 'AWS_PROXY'
-        assert integration['ResponseTransferMode'] == 'STREAM'
-        assert integration['TimeoutInMillis'] == 180000
-    settings = resources['Stage']['Properties']['MethodSettings'][0]
-    assert settings['ThrottlingBurstLimit'] == 10
-    assert settings['ThrottlingRateLimit'] == 1
-    assert settings['DataTraceEnabled'] is False
+    assert not any(
+        resource['Type'].startswith('AWS::ApiGateway::') for resource in resources.values()
+    )
+    assert resources['FunctionUrl']['Properties'] == {
+        'TargetFunctionArn': None,
+        'Qualifier': 'live',
+        'AuthType': 'NONE',
+        'InvokeMode': 'RESPONSE_STREAM',
+    }
+    assert resources['FunctionUrlPermission']['Properties']['Action'] == 'lambda:InvokeFunctionUrl'
+    assert resources['FunctionInvokePermission']['Properties']['InvokedViaFunctionUrl'] is True
     assert resources['Function']['Properties']['Timeout'] == 180
     assert template['Parameters']['ReservedConcurrency']['MaxValue'] == 10
-    assert (
-        'ReservedConcurrentExecutions: !If [HasReservedConcurrency, !Ref ReservedConcurrency, !Ref AWS::NoValue]'
-        in (ROOT / 'aws-infrastructure/serverless.yaml').read_text()
-    )
+    assert template['Parameters']['ReservedConcurrency']['MinValue'] == 10
+    assert resources['Function']['Properties']['ReservedConcurrentExecutions'] is None
     assert resources['Alias']['Properties']['Name'] == 'live'
-    assert (
-        'response-streaming-invocations'
-        in (ROOT / 'aws-infrastructure/serverless.yaml').read_text()
-    )
     assert 'AWS_LWA_INVOKE_MODE=response_stream' in (ROOT / 'Dockerfile.lambda').read_text()
+    assert 'AWS_LWA_REMOVE_BASE_PATH' not in (ROOT / 'Dockerfile.lambda').read_text()
 
 
 def test_edge_switch_rejects_foreign_host_and_distribution() -> None:
@@ -91,14 +87,11 @@ def test_edge_switch_rejects_foreign_host_and_distribution() -> None:
             )
 
 
-@pytest.mark.parametrize(
-    'regional,unreserved,existing,expected',
-    [(10, 10, 0, 0), (1100, 1100, 0, 10), (1100, 100, 10, 10)],
-)
+@pytest.mark.parametrize('regional,unreserved,existing', [(110, 110, 0), (1100, 100, 10)])
 def test_concurrency_selection_never_exceeds_ten(
-    regional: int, unreserved: int, existing: int, expected: int
+    regional: int, unreserved: int, existing: int
 ) -> None:
-    """Use the account ceiling or an exact reservation without an unenforced gap."""
+    """Use an exact reservation only when AWS can retain its required shared pool."""
     session = Mock()
     client = session.client.return_value
     client.get_account_settings.return_value = {
@@ -108,21 +101,24 @@ def test_concurrency_selection_never_exceeds_ten(
         }
     }
     client.get_function_concurrency.return_value = {'ReservedConcurrentExecutions': existing}
-    assert serverless.select_concurrency(session) == expected
+    assert serverless.select_concurrency(session) == 10
 
 
-def test_concurrency_selection_rejects_an_unenforceable_limit() -> None:
-    """Do not deploy when the regional limit exceeds ten but cannot reserve ten."""
+@pytest.mark.parametrize('regional,unreserved', [(10, 10), (50, 50), (110, 99)])
+def test_concurrency_selection_rejects_an_unenforceable_limit(
+    regional: int, unreserved: int
+) -> None:
+    """Do not deploy until an exact persistent reservation is possible."""
     session = Mock()
     client = session.client.return_value
     client.get_account_settings.return_value = {
         'AccountLimit': {
-            'ConcurrentExecutions': 50,
-            'UnreservedConcurrentExecutions': 50,
+            'ConcurrentExecutions': regional,
+            'UnreservedConcurrentExecutions': unreserved,
         }
     }
     client.get_function_concurrency.return_value = {}
-    with pytest.raises(ValueError, match='cap of ten'):
+    with pytest.raises(ValueError, match='reserve exactly ten'):
         serverless.select_concurrency(session)
 
 
@@ -134,6 +130,8 @@ def test_api_origin_validation_is_literal_and_regional(monkeypatch) -> None:
     monkeypatch.setenv('MCP_ENABLED', 'true')
     monkeypatch.setenv('MCP_ORIGIN_HOST', 'fixture.execute-api.ca-central-1.amazonaws.com')
     assert load_config()['MCP_ORIGIN_HOST'].startswith('fixture.execute-api.')
+    monkeypatch.setenv('MCP_ORIGIN_HOST', 'fixture.lambda-url.ca-central-1.on.aws')
+    assert load_config()['MCP_ORIGIN_HOST'].startswith('fixture.lambda-url.')
     for host in (
         'fixture.execute-api.us-east-1.amazonaws.com',
         'fixture.execute-api.ca-central-1.amazonaws.com.attacker.example',
@@ -206,25 +204,50 @@ def test_deploys_one_lambda_without_mutating_production_edge() -> None:
         'OriginPath': '/live',
     }
     with (
-        patch.object(serverless, 'select_concurrency', return_value=0),
+        patch.object(serverless, 'select_concurrency', return_value=10),
         patch.object(serverless, 'verify_image_access'),
         patch.object(serverless.deploy, 'stack_state'),
-        patch.object(serverless, 'outputs', side_effect=[app, edge]),
+        patch.object(
+            serverless,
+            'outputs',
+            side_effect=[
+                app,
+                edge,
+                {'Origin': 'https://production.execute-api.ca-central-1.amazonaws.com'},
+            ],
+        ),
         patch.object(serverless.deploy, 'verify_storage_and_owner', return_value='owner'),
-        patch.object(serverless, 'apply_stack', return_value=production) as apply,
+        patch.object(
+            serverless,
+            'apply_stack',
+            side_effect=[
+                production
+                | {
+                    'Origin': 'https://fixture.lambda-url.ca-central-1.on.aws/',
+                    'OriginPath': '',
+                },
+                production
+                | {
+                    'Origin': 'https://fixture.lambda-url.ca-central-1.on.aws/',
+                    'OriginPath': '',
+                },
+            ],
+        ) as apply,
         patch.object(serverless.deploy, 'verify_endpoint') as verify,
     ):
         result = serverless.deploy_lambda(session, image)
     assert apply.call_args.args[1] == serverless.STACK
+    assert apply.call_count == 2
     parameters = apply.call_args.args[3]
     assert parameters['ImageUri'] == image
     assert parameters['ClientId'] == 'productionclient'
     assert 'DeploymentMode' not in parameters
-    assert parameters['ReservedConcurrency'] == 0
+    assert parameters['ReservedConcurrency'] == 10
+    assert parameters['OriginHostname'] == 'fixture.lambda-url.ca-central-1.on.aws'
     assert result['production_cutover'] is False
     assert result['concurrency_cap'] == 10
     verify.assert_called_once_with(
-        'https://production.execute-api.ca-central-1.amazonaws.com/live',
+        'https://fixture.lambda-url.ca-central-1.on.aws',
         'https://production.cloudfront.net',
     )
 

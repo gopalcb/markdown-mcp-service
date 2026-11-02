@@ -11,7 +11,7 @@ Parameters:
     Type: String
     Default: ''
     AllowedValues: ['', /live]
-    Description: Empty for ECS rollback; /live for the Regional REST API stage.
+    Description: Empty for ECS or Lambda URL; /live remains accepted only for an older REST API rollback artifact.
 Resources:
   Distribution:
     Type: AWS::CloudFront::Distribution
