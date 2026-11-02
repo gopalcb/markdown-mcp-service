@@ -407,9 +407,7 @@
       ],
       "Resource": [
         "arn:aws:lambda:ca-central-1:249766001220:function:markdown-mcp-service",
-        "arn:aws:lambda:ca-central-1:249766001220:function:markdown-mcp-service:*",
-        "arn:aws:lambda:ca-central-1:249766001220:function:markdown-mcp-service-preview",
-        "arn:aws:lambda:ca-central-1:249766001220:function:markdown-mcp-service-preview:*"
+        "arn:aws:lambda:ca-central-1:249766001220:function:markdown-mcp-service:*"
       ]
     },
     {

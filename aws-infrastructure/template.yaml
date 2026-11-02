@@ -26,9 +26,7 @@ Resources:
             Action: [ecr:BatchGetImage, ecr:GetDownloadUrlForLayer]
             Condition:
               ArnLike:
-                aws:SourceArn:
-                  - arn:aws:lambda:ca-central-1:249766001220:function:markdown-mcp-service
-                  - arn:aws:lambda:ca-central-1:249766001220:function:markdown-mcp-service-preview
+                aws:SourceArn: arn:aws:lambda:ca-central-1:249766001220:function:markdown-mcp-service
   Logs:
     Type: AWS::Logs::LogGroup
     Properties:

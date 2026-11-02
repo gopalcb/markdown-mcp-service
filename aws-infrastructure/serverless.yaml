@@ -1,14 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Parallel Markdown MCP Lambda and Regional streaming REST API; existing ECS, CloudFront, Cognito and data remain owned by their stacks.
+Description: One Markdown MCP Lambda and Regional streaming REST API; existing ECS, CloudFront, Cognito and data remain owned by their stacks.
 Parameters:
-  DeploymentMode:
-    Type: String
-    Default: production
-    AllowedValues: [production, preview]
-  RuntimeRoleArn:
-    Type: String
-    Default: arn:aws:iam::249766001220:role/markdown-mcp-service-lambda-role
-    AllowedPattern: '^arn:aws:iam::249766001220:role/markdown-mcp-service-lambda-role$'
   ImageUri:
     Type: String
     AllowedPattern: '^249766001220\.dkr\.ecr\.ca-central-1\.amazonaws\.com/markdown-mcp-service@sha256:[a-f0-9]{64}$'
@@ -29,21 +21,19 @@ Parameters:
     AllowedPattern: '^arn:aws:secretsmanager:ca-central-1:249766001220:secret:markdown-mcp-service-oauth-key-[A-Za-z0-9]{6}$'
   ReservedConcurrency:
     Type: Number
-    Default: 2
-    MinValue: 1
+    Default: 0
+    MinValue: 0
     MaxValue: 10
 Conditions:
-  IsPreview: !Equals [!Ref DeploymentMode, preview]
-  IsProduction: !Equals [!Ref DeploymentMode, production]
+  HasReservedConcurrency: !Not [!Equals [!Ref ReservedConcurrency, 0]]
 Resources:
   Logs:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !If [IsPreview, /aws/lambda/markdown-mcp-service-preview, /aws/lambda/markdown-mcp-service]
+      LogGroupName: /aws/lambda/markdown-mcp-service
       RetentionInDays: 7
   Role:
     Type: AWS::IAM::Role
-    Condition: IsProduction
     Properties:
       RoleName: markdown-mcp-service-lambda-role
       AssumeRolePolicyDocument:
@@ -81,30 +71,30 @@ Resources:
   Function:
     Type: AWS::Lambda::Function
     Properties:
-      FunctionName: !If [IsPreview, markdown-mcp-service-preview, markdown-mcp-service]
+      FunctionName: markdown-mcp-service
       PackageType: Image
       Code: {ImageUri: !Ref ImageUri}
       Architectures: [x86_64]
-      Role: !If [IsPreview, !Ref RuntimeRoleArn, !GetAtt Role.Arn]
+      Role: !GetAtt Role.Arn
       MemorySize: 1024
       Timeout: 180
-      ReservedConcurrentExecutions: !Ref ReservedConcurrency
+      ReservedConcurrentExecutions: !If [HasReservedConcurrency, !Ref ReservedConcurrency, !Ref AWS::NoValue]
       Environment:
         Variables:
           MCP_ENABLED: 'true'
-          PUBLIC_BASE_URL: !If [IsPreview, !Sub 'https://${PreviewDistribution.DomainName}', !Ref PublicBaseUrl]
-          MCP_RESOURCE: !If [IsPreview, !Sub 'https://${PreviewDistribution.DomainName}/mcp/', !Sub '${PublicBaseUrl}/mcp/']
+          PUBLIC_BASE_URL: !Ref PublicBaseUrl
+          MCP_RESOURCE: !Sub '${PublicBaseUrl}/mcp/'
           MCP_ORIGIN_HOST: !Sub '${Api}.execute-api.${AWS::Region}.amazonaws.com'
           MCP_WRITE_SCOPE: markdown-api/write
           COGNITO_ISSUER: https://cognito-idp.ca-central-1.amazonaws.com/ca-central-1_VwnNJYce8
-          COGNITO_CLIENT_ID: !If [IsPreview, !Ref PreviewClient, !Ref ClientId]
+          COGNITO_CLIENT_ID: !Ref ClientId
           COGNITO_DOMAIN: https://softrobots-usernames-249766001220.auth.ca-central-1.amazoncognito.com
           ALLOWED_SUB: !Ref AllowedSubject
           S3_BUCKET: agent-work-history--249766001220-ca-central-1
           USER_FILES_TABLE: softrobots-document-api-user-files
           OAUTH_STATE_TABLE: markdown-mcp-service-oauth
           OAUTH_SECRET_ARN: !Ref OAuthSecretArn
-          OAUTH_STATE_NAMESPACE: !If [IsPreview, preview, '']
+          OAUTH_STATE_NAMESPACE: ''
       Tags:
         - {Key: Project, Value: markdown-mcp-service-serverless}
   Version:
@@ -123,7 +113,7 @@ Resources:
   Api:
     Type: AWS::ApiGateway::RestApi
     Properties:
-      Name: !If [IsPreview, markdown-mcp-service-preview, markdown-mcp-service-serverless]
+      Name: markdown-mcp-service-serverless
       EndpointConfiguration: {Types: [REGIONAL]}
       Tags:
         - {Key: Project, Value: markdown-mcp-service-serverless}
@@ -174,7 +164,7 @@ Resources:
       MethodSettings:
         - ResourcePath: /*
           HttpMethod: '*'
-          ThrottlingBurstLimit: 60
+          ThrottlingBurstLimit: 10
           ThrottlingRateLimit: 1
           MetricsEnabled: true
           DataTraceEnabled: false
@@ -188,87 +178,13 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*'
       SourceAccount: !Ref AWS::AccountId
-  PreviewDistribution:
-    Type: AWS::CloudFront::Distribution
-    Condition: IsPreview
-    Properties:
-      Tags:
-        - {Key: Project, Value: markdown-mcp-service-edge}
-        - {Key: DeploymentPurpose, Value: preview}
-      DistributionConfig:
-        Comment: Isolated Markdown MCP Lambda OAuth preview
-        Enabled: true
-        IPV6Enabled: true
-        HttpVersion: http2and3
-        PriceClass: PriceClass_100
-        ViewerCertificate: {CloudFrontDefaultCertificate: true}
-        Origins:
-          - Id: PreviewApi
-            DomainName: !Sub '${Api}.execute-api.${AWS::Region}.amazonaws.com'
-            OriginPath: /live
-            ConnectionAttempts: 1
-            ConnectionTimeout: 10
-            CustomOriginConfig:
-              OriginProtocolPolicy: https-only
-              OriginSSLProtocols: [TLSv1.2]
-              OriginReadTimeout: 60
-              OriginKeepaliveTimeout: 5
-        DefaultCacheBehavior:
-          TargetOriginId: PreviewApi
-          ViewerProtocolPolicy: redirect-to-https
-          AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
-          CachedMethods: [GET, HEAD]
-          Compress: false
-          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
-          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
-        CustomErrorResponses:
-          - {ErrorCode: 400, ErrorCachingMinTTL: 0}
-          - {ErrorCode: 403, ErrorCachingMinTTL: 0}
-          - {ErrorCode: 404, ErrorCachingMinTTL: 0}
-          - {ErrorCode: 405, ErrorCachingMinTTL: 0}
-          - {ErrorCode: 414, ErrorCachingMinTTL: 0}
-          - {ErrorCode: 416, ErrorCachingMinTTL: 0}
-          - {ErrorCode: 500, ErrorCachingMinTTL: 0}
-          - {ErrorCode: 501, ErrorCachingMinTTL: 0}
-          - {ErrorCode: 502, ErrorCachingMinTTL: 0}
-          - {ErrorCode: 503, ErrorCachingMinTTL: 0}
-          - {ErrorCode: 504, ErrorCachingMinTTL: 0}
-  PreviewClient:
-    Type: AWS::Cognito::UserPoolClient
-    Condition: IsPreview
-    Properties:
-      UserPoolId: ca-central-1_VwnNJYce8
-      ClientName: markdown-mcp-service-preview
-      GenerateSecret: false
-      EnableTokenRevocation: true
-      PreventUserExistenceErrors: ENABLED
-      ExplicitAuthFlows: [ALLOW_USER_AUTH, ALLOW_REFRESH_TOKEN_AUTH]
-      AllowedOAuthFlowsUserPoolClient: true
-      AllowedOAuthFlows: [code]
-      AllowedOAuthScopes: [openid, email, markdown-api/write]
-      CallbackURLs: [!Sub 'https://${PreviewDistribution.DomainName}/auth/callback']
-      SupportedIdentityProviders: [COGNITO]
-      AccessTokenValidity: 5
-      IdTokenValidity: 5
-      RefreshTokenValidity: 90
-      TokenValidityUnits: {AccessToken: minutes, IdToken: minutes, RefreshToken: days}
-  PreviewBranding:
-    Type: AWS::Cognito::ManagedLoginBranding
-    Condition: IsPreview
-    Properties:
-      UserPoolId: ca-central-1_VwnNJYce8
-      ClientId: !Ref PreviewClient
-      UseCognitoProvidedValues: true
 Outputs:
   PublicBaseUrl:
-    Value: !If [IsPreview, !Sub 'https://${PreviewDistribution.DomainName}', !Ref PublicBaseUrl]
+    Value: !Ref PublicBaseUrl
   ClientId:
-    Value: !If [IsPreview, !Ref PreviewClient, !Ref ClientId]
+    Value: !Ref ClientId
   RuntimeRoleArn:
-    Value: !If [IsPreview, !Ref RuntimeRoleArn, !GetAtt Role.Arn]
-  PreviewDistributionId:
-    Condition: IsPreview
-    Value: !Ref PreviewDistribution
+    Value: !GetAtt Role.Arn
   ReleaseId:
     Value: !Ref ReleaseId
   ImageUri:
@@ -283,3 +199,5 @@ Outputs:
     Value: !Ref Alias
   Version:
     Value: !GetAtt Version.Version
+  ReservedConcurrency:
+    Value: !Ref ReservedConcurrency

@@ -294,8 +294,9 @@ def wait_service(ecs, container: dict) -> dict:
     raise TimeoutError('MCP deployment did not complete; inspect before retrying')
 
 
-def verify_endpoint(base: str) -> None:
-    """Check public health, real S256 discovery, resource binding and anonymous denial once."""
+def verify_endpoint(base: str, advertised_base: str | None = None) -> None:
+    """Check health, S256 discovery, resource binding and anonymous denial once."""
+    published = advertised_base or base
     context = ssl.create_default_context(cafile=get_cert_path(True))
     for path in (
         '/health',
@@ -307,16 +308,16 @@ def verify_endpoint(base: str) -> None:
         if path == '/health' and payload.get('status') != 'ok':
             raise ValueError('Unexpected MCP health response')
         if path == '/.well-known/oauth-protected-resource/mcp' and (
-            payload.get('resource') != base + '/mcp/'
-            or payload.get('authorization_servers') != [base + '/']
+            payload.get('resource') != published + '/mcp/'
+            or payload.get('authorization_servers') != [published + '/']
         ):
             raise ValueError('Published MCP resource or authorization server does not match')
         if path == '/.well-known/oauth-authorization-server' and (
-            payload.get('issuer') != base + '/'
+            payload.get('issuer') != published + '/'
             or 'S256' not in payload.get('code_challenge_methods_supported', [])
-            or payload.get('registration_endpoint') != base + '/register'
-            or payload.get('authorization_endpoint') != base + '/authorize'
-            or payload.get('token_endpoint') != base + '/token'
+            or payload.get('registration_endpoint') != published + '/register'
+            or payload.get('authorization_endpoint') != published + '/authorize'
+            or payload.get('token_endpoint') != published + '/token'
         ):
             raise ValueError('Published OAuth discovery lacks the expected S256 adapter endpoints')
     try:

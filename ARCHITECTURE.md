@@ -23,35 +23,29 @@ in their original stacks. The new role has the same owner-scoped data access and
 uses Lambda-only trust. The existing ECR repository grants image retrieval to the
 exact Lambda function.
 
-Preparation also creates `markdown-mcp-service-preview` from the same template and
-image. Its conditional resources include an isolated CloudFront distribution,
-dedicated Cognito app client/branding and a separate Lambda/API. The preview URL
-supplies the issuer, resource audience and its exact `/auth/callback`; production
-CloudFront/client configuration is never updated during preparation. Both Lambda
-functions use the production stack's scoped runtime role. Preview OAuth collections
-use the `preview:` prefix and its signing/encryption key is derived separately from
-the retained master secret with a fixed HMAC domain. Production uses its original
-collection keys and original signing key, preserving existing sessions. Preview
-tools still access the owner-scoped document store: acceptance writes must use
-unique harmless preview filenames and reconcile their exact receipts.
+The serverless stack creates exactly one production MCP Lambda. It reuses the
+production Cognito client, callback, OAuth table/key and owner-scoped document
+storage. There is no preview function, preview distribution or preview Cognito
+client. CI first verifies the Regional API directly while the public CloudFront
+hostname still reaches ECS, then an explicit cutover switches only that edge origin.
 
-The REST stage applies an aggregate 60-request burst and one request/second refill;
-reserved concurrency defaults to two per function, four across both configurations.
-CI checks regional capacity before creating
-the reservation and fails rather than reducing the safety bound. Per-process ingress
-limits remain defense in depth. Application and API Gateway logs do not record
-document bodies or credential/query data.
+The REST stage applies an aggregate ten-request burst and one request/second refill.
+CI selects concurrency from live account settings. While the regional quota is ten,
+the template omits a reservation and the account ceiling is the hard shared limit.
+If the pending increase is approved and AWS can retain its required unreserved pool,
+the MCP function receives a reservation of exactly ten. Any intermediate state that
+cannot enforce ten fails before stack mutation. Per-process ingress limits remain
+defense in depth. Application and API Gateway logs do not record document bodies or
+credential/query data.
 
-`scripts/serverless.py` deploys a canary without changing production, validates
-recent release-bound acceptance evidence for cutover, saves the old origin/path,
-and restores that saved configuration for rollback. `serverless.yml` is the only
-migration deployment entry point. The original `deploy.yml` remains the ECS rollback
-path. No serverless migration command deletes ECS, CloudFront, Cognito or data.
-Acceptance additionally binds the current preview URL, client, Lambda version,
-image and distribution. A stale preview or one built from a different image cannot
-approve production. Preparation reads and requires the exact production/preview
-Lambda ECR pull policy, which must be applied separately through reviewed existing
-infrastructure CI; it never updates the production app stack to obtain that policy.
+`scripts/serverless.py` deploys the one immutable function without changing the
+public edge, checks its direct API health/discovery/anonymous-denial boundary, saves
+the old origin/path before cutover, and restores that saved configuration for
+rollback. `serverless.yml` is the only migration deployment entry point. The
+original `deploy.yml` remains the ECS rollback path. No serverless migration command
+deletes ECS, CloudFront, Cognito or data. Deployment reads and requires the exact
+production Lambda ECR pull policy; it never updates the application stack to obtain
+that prerequisite.
 
 Slow storage can outlast a client or function deadline. Cancelling the async tool
 does not stop an already-running storage thread; this is covered by a controlled
