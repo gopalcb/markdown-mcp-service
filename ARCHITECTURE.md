@@ -8,15 +8,13 @@ file-group: workflow-docs
 `Dockerfile.lambda` adds AWS Lambda Web Adapter 1.1.0 pinned to its multi-architecture
 image digest. The existing ASGI app and its stateless JSON MCP transport remain the
 application boundary. `aws-infrastructure/serverless.yaml` creates a parallel Lambda
-function, retained immutable versions, a `live` alias and a Regional REST API. The
-Lambda and integration deadlines are 180 seconds. API Gateway uses its response-
-streaming Lambda invocation URI and the adapter emits the required metadata plus
-eight-null delimiter; MCP still returns one JSON response. REST streaming avoids
-HTTP API v2's fixed 30-second integration limit for slow multi-file writes.
+function, retained immutable versions, a `live` alias and a streaming Lambda Function
+URL. The Lambda deadline is 180 seconds. The adapter emits the required metadata plus
+eight-null delimiter; MCP still returns one JSON response. The Function URL preserves
+the standard dynamic `WWW-Authenticate` headers that API Gateway remaps.
 
 CloudFront keeps its current hostname and uncached request policies. Cutover changes
-only the edge origin to the execute-api hostname with `/live` as OriginPath. The
-adapter removes that stage prefix when present. Both the public hostname and exact
+only the edge origin to the Lambda URL hostname with an empty OriginPath. Both the public hostname and exact
 regional origin Host are allowed; forwarded Host never establishes trust. The
 existing OAuth table/key, Cognito client/resource server and document storage stay
 in their original stacks. The new role has the same owner-scoped data access and
@@ -26,20 +24,18 @@ exact Lambda function.
 The serverless stack creates exactly one production MCP Lambda. It reuses the
 production Cognito client, callback, OAuth table/key and owner-scoped document
 storage. There is no preview function, preview distribution or preview Cognito
-client. CI first verifies the Regional API directly while the public CloudFront
+client. CI first verifies the Function URL directly while the public CloudFront
 hostname still reaches ECS, then an explicit cutover switches only that edge origin.
 
-The REST stage applies an aggregate ten-request burst and one request/second refill.
-CI selects concurrency from live account settings. While the regional quota is ten,
-the template omits a reservation and the account ceiling is the hard shared limit.
-If the pending increase is approved and AWS can retain its required unreserved pool,
-the MCP function receives a reservation of exactly ten. Any intermediate state that
-cannot enforce ten fails before stack mutation. Per-process ingress limits remain
-defense in depth. Application and API Gateway logs do not record document bodies or
+CI reads live account settings and deploys only when AWS can retain its required
+100-execution shared pool while giving the MCP function a reservation of exactly ten.
+This avoids a future quota approval silently lifting an account-wide cap. Any state
+that cannot enforce the explicit reservation fails before stack mutation. Per-process
+ingress limits remain defense in depth. Application logs do not record document bodies or
 credential/query data.
 
 `scripts/serverless.py` deploys the one immutable function without changing the
-public edge, checks its direct API health/discovery/anonymous-denial boundary, saves
+public edge, checks its direct Function URL health/discovery/anonymous-denial boundary, saves
 the old origin/path before cutover, and restores that saved configuration for
 rollback. `serverless.yml` is the only migration deployment entry point. The
 original `deploy.yml` remains the ECS rollback path. No serverless migration command
@@ -56,7 +52,7 @@ runtime limit, not a claim that every ten-file batch succeeds in that duration.
 The Docker Runtime API test executes the actual pinned adapter, verifies streaming
 framing, base64 bodies, repeated query values, literal origin Host, cookie forwarding,
 two distinct Secure/HttpOnly response cookies, and private response headers. It uses
-synthetic data and does not establish managed API Gateway behavior or private OAuth.
+synthetic data and does not establish managed Function URL behavior or private OAuth.
 
 ## Existing ECS production path
 

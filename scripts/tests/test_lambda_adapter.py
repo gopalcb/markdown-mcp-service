@@ -20,7 +20,7 @@ import pytest
 
 
 class RuntimeHandler(BaseHTTPRequestHandler):
-    """Serve synthetic REST proxy requests and capture streaming Runtime API replies."""
+    """Serve synthetic Function URL requests and capture streaming Runtime API replies."""
 
     def log_message(self, format: str, *args) -> None:
         """Keep request paths and synthetic payloads out of test output."""
@@ -79,27 +79,36 @@ class RuntimeHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
-def rest_event(path: str, method: str = 'GET') -> dict:
-    """Build the REST API proxy input that the streaming integration actually sends."""
+def function_url_event(path: str, method: str = 'GET') -> dict:
+    """Build the payload-v2 input used by a streaming Lambda Function URL."""
+    host = 'fixture.lambda-url.ca-central-1.on.aws'
     return {
-        'resource': '/{proxy+}',
-        'path': path,
-        'httpMethod': method,
+        'version': '2.0',
+        'routeKey': '$default',
+        'rawPath': path,
+        'rawQueryString': 'state=a%2Bb%2F%3D&repeat=first&repeat=second',
         'headers': {
-            'Host': 'fixture.execute-api.ca-central-1.amazonaws.com',
-            'Cookie': 'left=1; right=2',
+            'host': host,
+            'authorization': 'Bearer synthetic-fixture',
         },
-        'multiValueHeaders': {
-            'Host': ['fixture.execute-api.ca-central-1.amazonaws.com'],
-            'Cookie': ['left=1; right=2'],
-        },
-        'queryStringParameters': {'state': 'a+b/='},
-        'multiValueQueryStringParameters': {'state': ['a+b/='], 'repeat': ['first', 'second']},
+        'cookies': ['left=1', 'right=2'],
         'requestContext': {
-            'stage': 'live',
-            'path': '/live' + path,
-            'httpMethod': method,
-            'identity': {'sourceIp': '127.0.0.1'},
+            'accountId': 'anonymous',
+            'apiId': 'fixture',
+            'domainName': host,
+            'domainPrefix': 'fixture',
+            'http': {
+                'method': method,
+                'path': path,
+                'protocol': 'HTTP/1.1',
+                'sourceIp': '127.0.0.1',
+                'userAgent': 'adapter-test',
+            },
+            'requestId': str(uuid4()),
+            'routeKey': '$default',
+            'stage': '$default',
+            'time': '01/Nov/2026:00:00:00 +0000',
+            'timeEpoch': 1793491200000,
         },
         'body': base64.b64encode('unicode: café'.encode()).decode() if method == 'POST' else None,
         'isBase64Encoded': method == 'POST',
@@ -109,7 +118,7 @@ def rest_event(path: str, method: str = 'GET') -> dict:
 @pytest.mark.skipif(
     not os.environ.get('MCP_LAMBDA_TEST_IMAGE'), reason='Requires an explicitly built Lambda image'
 )
-def test_real_adapter_rest_stream_envelope_cookies_and_proxy_mapping() -> None:
+def test_real_adapter_function_url_stream_envelope_headers_and_proxy_mapping() -> None:
     """Verify the real binary emits eight-null metadata framing and distinct cookies."""
     server = ThreadingHTTPServer(('0.0.0.0', 0), RuntimeHandler)
     server.daemon_threads = True
@@ -152,9 +161,11 @@ def test_real_adapter_rest_stream_envelope_cookies_and_proxy_mapping() -> None:
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
         for event in (
-            rest_event('/health'),
-            rest_event('/adapter-contract', 'POST'),
-            rest_event('/mcp/', 'POST'),
+            function_url_event('/health'),
+            function_url_event('/adapter-contract', 'POST'),
+            function_url_event('/adapter-unauthorized'),
+            function_url_event('/adapter-forbidden'),
+            function_url_event('/mcp/', 'POST'),
         ):
             server.events.put(event)
             try:
@@ -170,24 +181,31 @@ def test_real_adapter_rest_stream_envelope_cookies_and_proxy_mapping() -> None:
             assert headers['lambda-runtime-function-response-mode'] == 'streaming'
             metadata, payload = body.split(b'\x00' * 8, 1)
             meta = json.loads(metadata)
-            if event['path'] == '/health':
+            if event['rawPath'] == '/health':
                 assert meta['statusCode'] == 200
                 assert json.loads(payload) == {'status': 'ok'}
-            elif event['path'] == '/adapter-contract':
+            elif event['rawPath'] == '/adapter-contract':
                 assert meta['statusCode'] == 200
                 cookies = meta.get('cookies', [])
                 assert len(cookies) == 2
                 assert all('Secure' in cookie and 'HttpOnly' in cookie for cookie in cookies)
                 values = json.loads(payload)
                 assert values['body'] == 'unicode: café'
-                assert values['host'] == 'fixture.execute-api.ca-central-1.amazonaws.com'
+                assert values['host'] == 'fixture.lambda-url.ca-central-1.on.aws'
                 assert values['cookies'] == 'left=1; right=2'
+                assert values['authorization'] == 'Bearer synthetic-fixture'
                 assert parse_qs(values['query']) == {
                     'state': ['a+b/='],
                     'repeat': ['first', 'second'],
                 }
                 assert meta['headers']['cache-control'] == 'no-store'
                 assert meta['headers']['referrer-policy'] == 'strict-origin'
+            elif event['rawPath'] == '/adapter-unauthorized':
+                assert meta['statusCode'] == 401
+                assert 'resource_metadata=' in meta['headers']['www-authenticate']
+            elif event['rawPath'] == '/adapter-forbidden':
+                assert meta['statusCode'] == 403
+                assert 'insufficient_scope' in meta['headers']['www-authenticate']
             else:
                 assert meta['statusCode'] == 503
     finally:

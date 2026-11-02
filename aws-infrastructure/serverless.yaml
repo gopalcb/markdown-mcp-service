@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: One Markdown MCP Lambda and Regional streaming REST API; existing ECS, CloudFront, Cognito and data remain owned by their stacks.
+Description: One Markdown MCP Lambda with a streaming function URL; existing ECS, CloudFront, Cognito and data remain owned by their stacks.
 Parameters:
   ImageUri:
     Type: String
@@ -21,11 +21,13 @@ Parameters:
     AllowedPattern: '^arn:aws:secretsmanager:ca-central-1:249766001220:secret:markdown-mcp-service-oauth-key-[A-Za-z0-9]{6}$'
   ReservedConcurrency:
     Type: Number
-    Default: 0
-    MinValue: 0
+    Default: 10
+    MinValue: 10
     MaxValue: 10
-Conditions:
-  HasReservedConcurrency: !Not [!Equals [!Ref ReservedConcurrency, 0]]
+  OriginHostname:
+    Type: String
+    AllowedPattern: '^(?:[a-z0-9]+\.execute-api\.ca-central-1\.amazonaws\.com|[a-z0-9]+\.lambda-url\.ca-central-1\.on\.aws)$'
+    Description: Exact current or newly allocated direct origin host; CI converges this to the function URL before verification.
 Resources:
   Logs:
     Type: AWS::Logs::LogGroup
@@ -78,13 +80,13 @@ Resources:
       Role: !GetAtt Role.Arn
       MemorySize: 1024
       Timeout: 180
-      ReservedConcurrentExecutions: !If [HasReservedConcurrency, !Ref ReservedConcurrency, !Ref AWS::NoValue]
+      ReservedConcurrentExecutions: !Ref ReservedConcurrency
       Environment:
         Variables:
           MCP_ENABLED: 'true'
           PUBLIC_BASE_URL: !Ref PublicBaseUrl
           MCP_RESOURCE: !Sub '${PublicBaseUrl}/mcp/'
-          MCP_ORIGIN_HOST: !Sub '${Api}.execute-api.${AWS::Region}.amazonaws.com'
+          MCP_ORIGIN_HOST: !Ref OriginHostname
           MCP_WRITE_SCOPE: markdown-api/write
           COGNITO_ISSUER: https://cognito-idp.ca-central-1.amazonaws.com/ca-central-1_VwnNJYce8
           COGNITO_CLIENT_ID: !Ref ClientId
@@ -110,74 +112,28 @@ Resources:
       Name: live
       FunctionName: !Ref Function
       FunctionVersion: !GetAtt Version.Version
-  Api:
-    Type: AWS::ApiGateway::RestApi
+  FunctionUrl:
+    Type: AWS::Lambda::Url
+    DependsOn: Alias
     Properties:
-      Name: markdown-mcp-service-serverless
-      EndpointConfiguration: {Types: [REGIONAL]}
-      Tags:
-        - {Key: Project, Value: markdown-mcp-service-serverless}
-  Proxy:
-    Type: AWS::ApiGateway::Resource
+      TargetFunctionArn: !Ref Function
+      Qualifier: live
+      AuthType: NONE
+      InvokeMode: RESPONSE_STREAM
+  FunctionUrlPermission:
+    Type: AWS::Lambda::Permission
     Properties:
-      RestApiId: !Ref Api
-      ParentId: !GetAtt Api.RootResourceId
-      PathPart: '{proxy+}'
-  RootMethod:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      RestApiId: !Ref Api
-      ResourceId: !GetAtt Api.RootResourceId
-      HttpMethod: ANY
-      AuthorizationType: NONE
-      Integration:
-        Type: AWS_PROXY
-        IntegrationHttpMethod: POST
-        Uri: !Sub 'arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2021-11-15/functions/${Alias}/response-streaming-invocations'
-        ResponseTransferMode: STREAM
-        TimeoutInMillis: 180000
-  ProxyMethod:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      RestApiId: !Ref Api
-      ResourceId: !Ref Proxy
-      HttpMethod: ANY
-      AuthorizationType: NONE
-      Integration:
-        Type: AWS_PROXY
-        IntegrationHttpMethod: POST
-        Uri: !Sub 'arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2021-11-15/functions/${Alias}/response-streaming-invocations'
-        ResponseTransferMode: STREAM
-        TimeoutInMillis: 180000
-  Deployment:
-    Type: AWS::ApiGateway::Deployment
-    DependsOn: [RootMethod, ProxyMethod]
-    Properties:
-      RestApiId: !Ref Api
-      Description: !Ref ReleaseId
-  Stage:
-    Type: AWS::ApiGateway::Stage
-    Properties:
-      RestApiId: !Ref Api
-      DeploymentId: !Ref Deployment
-      StageName: live
-      MethodSettings:
-        - ResourcePath: /*
-          HttpMethod: '*'
-          ThrottlingBurstLimit: 10
-          ThrottlingRateLimit: 1
-          MetricsEnabled: true
-          DataTraceEnabled: false
-      Tags:
-        - {Key: Project, Value: markdown-mcp-service-serverless}
-  Permission:
+      FunctionName: !Ref Alias
+      Action: lambda:InvokeFunctionUrl
+      Principal: '*'
+      FunctionUrlAuthType: NONE
+  FunctionInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
       FunctionName: !Ref Alias
       Action: lambda:InvokeFunction
-      Principal: apigateway.amazonaws.com
-      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*'
-      SourceAccount: !Ref AWS::AccountId
+      Principal: '*'
+      InvokedViaFunctionUrl: true
 Outputs:
   PublicBaseUrl:
     Value: !Ref PublicBaseUrl
@@ -190,9 +146,9 @@ Outputs:
   ImageUri:
     Value: !Ref ImageUri
   Origin:
-    Value: !Sub 'https://${Api}.execute-api.${AWS::Region}.amazonaws.com'
+    Value: !GetAtt FunctionUrl.FunctionUrl
   OriginPath:
-    Value: /live
+    Value: ''
   FunctionArn:
     Value: !GetAtt Function.Arn
   AliasArn:

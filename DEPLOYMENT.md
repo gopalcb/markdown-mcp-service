@@ -6,17 +6,17 @@ file-group: workflow-docs
 
 ## Serverless migration
 
-The `serverless.yml` workflow deploys a parallel Regional REST API and Lambda
-container while the existing ECS service remains available for rollback. Use this
+The `serverless.yml` workflow deploys one Lambda container with a streaming Function
+URL while the existing ECS service remains available for rollback. Use this
 workflow for the migration. The older workflow below continues to deploy ECS.
 
 First synchronize `aws-infrastructure/delivery.yaml` into the Softrobots hash-pinned
 identity bridge and run that reviewed GitHub bootstrap. The inline policy snapshot
 must match `deployer-policy.json`; its aggregate compact size remains below 10,240
-bytes. New API Gateway mutations require CloudFormation; Lambda permissions cover
-the `markdown-mcp-service` function and its aliases/versions. REST API create operations
-cannot name a future API ID, so the regional REST API resource family is the
-documented provisioning scope and must be reviewed with each change set.
+bytes. Lambda permissions cover the `markdown-mcp-service` function, its
+aliases/versions and its Function URL. The temporarily retained API Gateway delete
+scope lets CloudFormation remove the failed parallel REST origin during this migration;
+it cannot manage resources outside the owned REST API family.
 
 Before preparation, apply the reviewed ECR `RepositoryPolicyText` change in
 `aws-infrastructure/template.yaml` through the existing infrastructure CI, reviewing
@@ -28,24 +28,22 @@ production app stack or Cognito client to obtain its prerequisite.
 Run `serverless.yml` on `main` with action `deploy`. It tests the Linux amd64 image,
 exercises its actual adapter against a disposable local Runtime API, publishes the
 tested image digest and creates/updates only `markdown-mcp-service-serverless`.
-That stack owns one Lambda, immutable versions, a `live` alias and one Regional REST
-API. It preserves the existing production OAuth client, table, secret and edge.
-CI reads the live regional capacity before mutation. At a regional limit of ten it
-omits function reservation because the account ceiling already enforces the cap. If
-the pending increase is approved and at least 100 executions can remain unreserved,
-it reserves exactly ten for MCP. Any other state that could exceed ten without an
-enforceable reservation is rejected. API Gateway limits bursts to ten and refills
-at one request per second.
+That stack owns one Lambda, immutable versions, a `live` alias and one streaming
+Function URL. It preserves the existing production OAuth client, table, secret and
+edge. CI reads live regional capacity before mutation and requires enough headroom
+for AWS to retain 100 shared executions, then reserves exactly ten for MCP. The
+deployment stops while that explicit reservation is unavailable; it never relies on
+an account-wide quota that a pending increase could later change.
 
-The deployment artifact records the exact release ID, image, version, API origin,
+The deployment artifact records the exact release ID, image, version, Function URL origin,
 alias and existing public base URL. CI verifies health, published OAuth/resource
-metadata and anonymous MCP denial against the direct `/live` Regional API before
+metadata and anonymous MCP denial against the direct Function URL before
 cutover. For action `cutover`, supply that successful deployment `source_run_id`.
-The script rejects an artifact whose release, image or API origin differs from the
+The script rejects an artifact whose release, image or Function URL origin differs from the
 current deployed stack. Deployment and cutover use the same tested image digest;
 production keeps its existing issuer, Cognito client and public URL.
 The workflow saves the current edge origin/path before updating the existing
-distribution to the Regional API with `/live` OriginPath. It runs one public boundary
+distribution to the Function URL with an empty OriginPath. It runs one public boundary
 check afterward. Complete DCR, S256 PKCE, consent, Cognito login/callback, refresh/
 revocation and an authenticated MCP boundary privately after the switch. Never put
 passwords, email codes or tokens in workflow inputs, chat or logs. This public check
@@ -57,8 +55,8 @@ Artifacts are uploaded even when a cutover fails so rollback remains available.
 Never repeat a timed-out write merely because the caller did not receive a receipt.
 
 AWS references checked 2026-11-01:
-[REST Lambda response streaming](https://docs.aws.amazon.com/apigateway/latest/developerguide/response-transfer-mode-lambda.html),
-[HTTP API quotas](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-quotas.html),
+[Lambda Function URL response streaming](https://docs.aws.amazon.com/lambda/latest/dg/config-rs-invoke-furls.html),
+[Lambda Function URL invocation](https://docs.aws.amazon.com/lambda/latest/dg/urls-invocation.html),
 and [Lambda Web Adapter](https://github.com/aws/aws-lambda-web-adapter).
 
 ## Existing ECS deployment and rollback

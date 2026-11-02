@@ -7,7 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt && useradd --uid 10001 --crea
 COPY services/ /app/services/
 COPY mcp_services/ /app/mcp_services/
 COPY app.py /app/app.py
-ENV AWS_LWA_PORT=8000 AWS_LWA_READINESS_CHECK_PATH=/health AWS_LWA_INVOKE_MODE=response_stream AWS_LWA_ASYNC_INIT=false AWS_LWA_READINESS_CHECK_TIMEOUT_SECONDS=10 AWS_LWA_REMOVE_BASE_PATH=/live
+ENV AWS_LWA_PORT=8000 AWS_LWA_READINESS_CHECK_PATH=/health AWS_LWA_INVOKE_MODE=response_stream AWS_LWA_ASYNC_INIT=false AWS_LWA_READINESS_CHECK_TIMEOUT_SECONDS=10
 USER 10001
 EXPOSE 8000
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--no-proxy-headers", "--limit-concurrency", "32"]

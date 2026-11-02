@@ -83,7 +83,7 @@ def verify_image_access(session) -> None:
 
 
 def select_concurrency(session) -> int:
-    """Return zero or ten only when the live regional quota proves the requested cap."""
+    """Require enough regional headroom, then reserve exactly ten executions."""
     client = session.client('lambda')
     limits = client.get_account_settings()['AccountLimit']
     regional = int(limits['ConcurrentExecutions'])
@@ -94,11 +94,11 @@ def select_concurrency(session) -> int:
         )
     except client.exceptions.ResourceNotFoundException:
         existing = 0
-    if regional <= 10:
-        return 0
-    if unreserved + existing >= 110:
+    if regional >= 110 and unreserved + existing >= 110:
         return 10
-    raise ValueError('Regional Lambda quota cannot enforce an MCP concurrency cap of ten')
+    raise ValueError(
+        'Regional Lambda quota must leave 100 unreserved executions before MCP can reserve exactly ten'
+    )
 
 
 def deploy_lambda(session, image: str) -> dict:
@@ -120,22 +120,25 @@ def deploy_lambda(session, image: str) -> dict:
     if app.get('OAuthConfigured') != 'true':
         raise ValueError('Existing OAuth callback must already be configured')
     subject = deploy.verify_storage_and_owner(session)
-    template = (deploy.ROOT / 'aws-infrastructure/serverless.yaml').read_text()
-    # Version and deployment are immutable snapshots. Their logical IDs must change
-    # when a new image/configuration is released, not only their descriptions.
+    template_source = (deploy.ROOT / 'aws-infrastructure/serverless.yaml').read_text()
     release = hashlib.sha256(
-        (image + template + subject + json.dumps(app, sort_keys=True)).encode()
+        (image + template_source + subject + json.dumps(app, sort_keys=True)).encode()
     ).hexdigest()
-    for logical in ('Version', 'Deployment'):
-        template = re.sub(
-            r'(?m)^  ' + logical + r':$', '  ' + logical + release[:24] + ':', template
-        )
-        template = template.replace(
-            '!Ref ' + logical + '\n', '!Ref ' + logical + release[:24] + '\n'
-        )
-        template = template.replace(
-            '!GetAtt ' + logical + '.', '!GetAtt ' + logical + release[:24] + '.'
-        )
+
+    def render_template(stage: str) -> str:
+        """Give each immutable configuration phase its own Lambda version."""
+        logical = 'Version'
+        replacement = logical + release[:20] + stage
+        rendered = re.sub(r'(?m)^  ' + logical + r':$', '  ' + replacement + ':', template_source)
+        rendered = rendered.replace('!Ref ' + logical + '\n', '!Ref ' + replacement + '\n')
+        return rendered.replace('!GetAtt ' + logical + '.', '!GetAtt ' + replacement + '.')
+
+    current_state = deploy.stack_state(cf, STACK)
+    current = outputs(current_state) if current_state else {}
+    prior_host = urlsplit(current.get('Origin', '')).hostname or ''
+    has_url = bool(re.fullmatch(r'[a-z0-9]+\.lambda-url\.ca-central-1\.on\.aws', prior_host))
+    if not has_url:
+        prior_host = 'bootstrap.execute-api.ca-central-1.amazonaws.com'
     parameters = {
         'ImageUri': image,
         'ReleaseId': release,
@@ -144,9 +147,21 @@ def deploy_lambda(session, image: str) -> dict:
         'AllowedSubject': subject,
         'OAuthSecretArn': app['OAuthSecretArn'],
         'ReservedConcurrency': concurrency,
+        'OriginHostname': prior_host,
     }
-    result = apply_stack(session, STACK, template, parameters)
-    deploy.verify_endpoint(result['Origin'] + result['OriginPath'], base)
+    result = apply_stack(
+        session, STACK, render_template('Bound' if has_url else 'Bootstrap'), parameters
+    )
+    origin = result['Origin'].rstrip('/')
+    origin_host = urlsplit(origin).hostname or ''
+    if not re.fullmatch(r'[a-z0-9]+\.lambda-url\.ca-central-1\.on\.aws', origin_host):
+        raise ValueError('Expected the exact regional Lambda function URL origin')
+    if parameters['OriginHostname'] != origin_host:
+        parameters['OriginHostname'] = origin_host
+        result = apply_stack(session, STACK, render_template('Bound'), parameters)
+        origin = result['Origin'].rstrip('/')
+    result['Origin'] = origin
+    deploy.verify_endpoint(origin, base)
     return result | {
         'image': image,
         'release_id': release,
@@ -175,6 +190,7 @@ def switch_origin(session, target: dict) -> dict:
     path = target.get('OriginPath', '')
     if not (
         (re.fullmatch(r'[a-z0-9-]+\.ecs\.ca-central-1\.on\.aws', host) and path == '')
+        or (re.fullmatch(r'[a-z0-9]+\.lambda-url\.ca-central-1\.on\.aws', host) and path == '')
         or (
             re.fullmatch(r'[a-z0-9]+\.execute-api\.ca-central-1\.amazonaws\.com', host)
             and path == '/live'
@@ -228,7 +244,7 @@ def main() -> None:
             session,
             {
                 'OriginHostname': urlsplit(release['Origin']).hostname,
-                'OriginPath': '/live',
+                'OriginPath': release['OriginPath'],
                 'DistributionId': current['DistributionId'],
             },
         )

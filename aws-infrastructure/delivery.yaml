@@ -301,6 +301,10 @@ Resources:
             - lambda:UpdateFunctionConfiguration
             - lambda:GetFunction
             - lambda:GetFunctionConfiguration
+            - lambda:CreateFunctionUrlConfig
+            - lambda:GetFunctionUrlConfig
+            - lambda:UpdateFunctionUrlConfig
+            - lambda:DeleteFunctionUrlConfig
             - lambda:DeleteFunction
             - lambda:PublishVersion
             - lambda:CreateAlias
