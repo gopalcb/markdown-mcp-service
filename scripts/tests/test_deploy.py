@@ -185,6 +185,7 @@ def test_delivery_role_policy_is_complete_and_has_no_self_management():
         'ecs:DescribeClusters',
         'ecs:CreateExpressGatewayService',
         'ecr:GetAuthorizationToken',
+        'ecr:GetLifecyclePolicy',
     } <= actions
     resources = [
         value
