@@ -305,6 +305,26 @@ def test_public_verification_requires_real_s256_adapter_discovery() -> None:
     )
     with patch.object(deploy.urllib.request, 'urlopen', side_effect=responses):
         deploy.verify_endpoint(base)
+    origin = 'https://fixture.execute-api.ca-central-1.amazonaws.com/live'
+    origin_responses = [
+        io.BytesIO(json.dumps(payload).encode())
+        for payload in (
+            {'status': 'ok'},
+            {'resource': base + '/mcp/', 'authorization_servers': [base + '/']},
+            metadata,
+        )
+    ]
+    origin_responses.append(
+        HTTPError(
+            origin + '/mcp/',
+            401,
+            'Unauthorized',
+            {'WWW-Authenticate': 'Bearer resource_metadata="x"'},
+            None,
+        )
+    )
+    with patch.object(deploy.urllib.request, 'urlopen', side_effect=origin_responses):
+        deploy.verify_endpoint(origin, base)
     responses = [
         io.BytesIO(json.dumps(payload).encode())
         for payload in (

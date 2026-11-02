@@ -11,10 +11,7 @@ on:
         options: [deploy, cutover, rollback]
         default: deploy
       source_run_id:
-        description: Successful canary run for cutover; cutover run containing saved origin for rollback
-        type: string
-      acceptance_json:
-        description: Nonsecret revision-bound acceptance evidence JSON required for cutover
+        description: Successful Lambda run for cutover; cutover run containing saved origin for rollback
         type: string
 
 permissions:
@@ -91,7 +88,7 @@ jobs:
         with:
           name: markdown-mcp-lambda-image-${{ github.run_id }}
           path: /tmp/mcp-image
-      - name: Publish tested Lambda image and prepare isolated preview and production configuration
+      - name: Publish tested image and deploy the single MCP Lambda
         if: inputs.action == 'deploy'
         env:
           RELEASE_TAG: lambda-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -113,14 +110,12 @@ jobs:
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}
           path: /tmp
-      - name: Switch existing edge after recorded acceptance or restore saved origin
+      - name: Switch the existing edge or restore its saved origin
         if: inputs.action != 'deploy'
         env:
           MIGRATION_ACTION: ${{ inputs.action }}
-          ACCEPTANCE_JSON: ${{ inputs.acceptance_json }}
         run: |
-          python -c 'import os,pathlib; pathlib.Path("/tmp/markdown-mcp-acceptance.json").write_text(os.environ["ACCEPTANCE_JSON"])'
-          python scripts/serverless.py "$MIGRATION_ACTION" --acceptance /tmp/markdown-mcp-acceptance.json
+          python scripts/serverless.py "$MIGRATION_ACTION"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:

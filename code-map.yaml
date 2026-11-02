@@ -128,7 +128,7 @@ files:
       wait_service:
         summary: Require the matching image/environment revision's successful deployment.
       verify_endpoint:
-        summary: Check public health, real S256 discovery, resource binding and anonymous denial once.
+        summary: Check health, S256 discovery, resource binding and anonymous denial at the public edge or direct Lambda origin.
       deploy:
         summary: Create a health-only bootstrap if needed, then deploy the bound MCP resource.
       main:
@@ -318,22 +318,18 @@ files:
       test_missing_index_acknowledgement_cannot_report_ready:
         summary: An empty DynamoDB update response never fabricates a successful receipt.
   scripts/serverless.py:
-    purpose: Deploy the parallel MCP Lambda through GitHub and switch the existing edge explicitly.
+    purpose: Deploy one MCP Lambda through GitHub and switch the existing edge explicitly.
     functions:
       outputs:
         summary: Extract only nonsecret CloudFormation output values from a complete stack.
       apply_stack:
         summary: Issue one stack update and use the existing two-minute completion checks.
-      check_concurrency:
-        summary: Fail before mutation if the region cannot reserve the bounded function budget.
       verify_image_access:
         summary: Require pre-applied exact-function ECR access without changing production resources.
+      select_concurrency:
+        summary: Select no reservation or an exact reservation of ten only when the live regional quota enforces the cap.
       deploy_lambda:
-        summary: Deploy an immutable Lambda canary without changing the production edge origin.
-      preview_binding:
-        summary: Bind private preview evidence to the exact URL, client, version and image.
-      validate_acceptance:
-        summary: Require complete, recent, revision-bound evidence before an origin switch.
+        summary: Deploy one immutable Lambda and verify its direct API without changing the production edge origin.
       edge_origin:
         summary: Read the exact origin/path saved in the owned CloudFormation stack parameters.
       switch_origin:
@@ -345,12 +341,12 @@ files:
     functions:
       test_streaming_stack_preserves_existing_identity_and_bounds_ingress:
         summary: Use Regional streaming REST with bounded capacity and no recreated identity/data.
-      test_acceptance_is_complete_recent_and_revision_bound:
-        summary: Neither a health check nor stale evidence can approve production cutover.
-      test_insufficient_concurrency_fails_without_mutation:
-        summary: The regional minimum unreserved budget must survive the requested reservation.
       test_edge_switch_rejects_foreign_host_and_distribution:
         summary: Only the exact saved distribution and regional service origins can be used.
+      test_concurrency_selection_never_exceeds_ten:
+        summary: Use the account ceiling or an exact reservation without an unenforced gap.
+      test_concurrency_selection_rejects_an_unenforceable_limit:
+        summary: Do not deploy when the regional limit exceeds ten but cannot reserve ten.
       test_api_origin_validation_is_literal_and_regional:
         summary: An API origin Host is allowed without admitting foreign hosts or forwarded identity.
       test_cancelled_tool_may_finish_write_and_requires_reconciliation:
@@ -361,14 +357,10 @@ files:
         summary: Cancel the requester while preserving bounded cleanup of its storage worker.
       test_delivery_policy_remains_within_inline_limit:
         summary: Keep IAM snapshot parity and the documented aggregate inline-policy size bound.
-      test_prepare_deploys_isolated_preview_without_mutating_production_edge:
-        summary: Prepare two configurations with one image while preserving production identity.
-      test_preview_oauth_state_and_keys_are_isolated_from_production:
-        summary: Preview registrations, redemption and signing cannot share production sessions.
-      test_preview_dcr_and_consent_bind_only_preview_client_and_callback:
-        summary: Exercise preview consent through HTTP and reject its registration in production.
-      test_ecr_preflight_requires_both_exact_lambda_functions:
-        summary: Preparation reads its prerequisite without editing the production stack or client.
+      test_deploys_one_lambda_without_mutating_production_edge:
+        summary: Deploy one configuration and verify its direct origin before edge cutover.
+      test_ecr_preflight_requires_only_the_production_lambda:
+        summary: Deployment reads one production-function prerequisite without editing it.
   scripts/tests/test_lambda_adapter.py:
     purpose: Exercise the pinned adapter binary using a local disposable Lambda Runtime API.
     functions:

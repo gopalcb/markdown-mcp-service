@@ -1,15 +1,14 @@
-"""Deploy the parallel MCP Lambda through GitHub and switch the existing edge explicitly.
+"""Deploy one MCP Lambda through GitHub and switch the existing edge explicitly.
 
 The original application and edge stacks retain Cognito, OAuth state and ECS rollback.
-This module never deletes a stack or service. Acceptance evidence and a saved edge
-origin are required before a production switch.
+This module never deletes a stack or service. A direct Lambda-origin check and saved
+edge origin are required before a production switch.
 """
 
 import argparse
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -17,17 +16,7 @@ import deploy
 from botocore.exceptions import ClientError
 
 STACK = 'markdown-mcp-service-serverless'
-PREVIEW_STACK = 'markdown-mcp-service-preview'
 FUNCTION = 'markdown-mcp-service'
-CHECKS = (
-    'adapter_stream_envelope',
-    'oauth_cookies_query_origin',
-    'private_oauth_refresh_revoke',
-    'ready_receipt_readback',
-    'slow_storage_uncertain_write',
-    'cold_warm_latency',
-    'rollback_demonstrated',
-)
 
 
 def outputs(state: dict) -> dict:
@@ -64,25 +53,6 @@ def apply_stack(session, name: str, template: str, parameters: dict) -> dict:
     return deploy.wait_stack(client, name)
 
 
-def check_concurrency(session, requested: int) -> None:
-    """Fail before mutation if the region cannot reserve the bounded function budget."""
-    client = session.client('lambda')
-    settings = client.get_account_settings()
-    available = settings['AccountLimit']['UnreservedConcurrentExecutions']
-    existing = 0
-    for function in (FUNCTION, FUNCTION + '-preview'):
-        try:
-            existing += client.get_function_concurrency(FunctionName=function).get(
-                'ReservedConcurrentExecutions', 0
-            )
-        except client.exceptions.ResourceNotFoundException:
-            pass
-    if available + existing - requested * 2 < 100:
-        raise ValueError(
-            'Lambda regional quota cannot reserve concurrency while retaining 100 unreserved; request quota increase through the approved account process'
-        )
-
-
 def verify_image_access(session) -> None:
     """Require pre-applied exact-function ECR access without changing production resources."""
     try:
@@ -95,10 +65,7 @@ def verify_image_access(session) -> None:
                 'Apply the reviewed ECR Lambda pull policy through the existing infrastructure CI before preparation'
             ) from None
         raise
-    required = {
-        f'arn:aws:lambda:{deploy.REGION}:{deploy.ACCOUNT}:function:{name}'
-        for name in (FUNCTION, FUNCTION + '-preview')
-    }
+    required = f'arn:aws:lambda:{deploy.REGION}:{deploy.ACCOUNT}:function:{FUNCTION}'
     allowed = set()
     for statement in policy.get('Statement', []):
         if (
@@ -109,21 +76,40 @@ def verify_image_access(session) -> None:
         ):
             values = statement.get('Condition', {}).get('ArnLike', {}).get('aws:SourceArn', [])
             allowed.update([values] if isinstance(values, str) else values)
-    if not required <= allowed:
+    if required not in allowed:
         raise ValueError(
-            'Existing ECR policy must allow the exact production and preview Lambda functions before preparation'
+            'Existing ECR policy must allow the exact production Lambda function before deployment'
         )
 
 
-def deploy_lambda(session, image: str, concurrency: int) -> dict:
-    """Deploy an immutable Lambda canary without changing the production edge origin."""
+def select_concurrency(session) -> int:
+    """Return zero or ten only when the live regional quota proves the requested cap."""
+    client = session.client('lambda')
+    limits = client.get_account_settings()['AccountLimit']
+    regional = int(limits['ConcurrentExecutions'])
+    unreserved = int(limits['UnreservedConcurrentExecutions'])
+    try:
+        existing = client.get_function_concurrency(FunctionName=FUNCTION).get(
+            'ReservedConcurrentExecutions', 0
+        )
+    except client.exceptions.ResourceNotFoundException:
+        existing = 0
+    if regional <= 10:
+        return 0
+    if unreserved + existing >= 110:
+        return 10
+    raise ValueError('Regional Lambda quota cannot enforce an MCP concurrency cap of ten')
+
+
+def deploy_lambda(session, image: str) -> dict:
+    """Deploy one immutable Lambda without changing the production edge origin."""
     match = re.fullmatch(
         r'249766001220\.dkr\.ecr\.ca-central-1\.amazonaws\.com/markdown-mcp-service@sha256:([a-f0-9]{64})',
         image,
     )
     if not match:
         raise ValueError('Expected the dedicated repository immutable image digest')
-    check_concurrency(session, concurrency)
+    concurrency = select_concurrency(session)
     verify_image_access(session)
     cf = session.client('cloudformation')
     app = outputs(deploy.stack_state(cf))
@@ -159,65 +145,16 @@ def deploy_lambda(session, image: str, concurrency: int) -> dict:
         'OAuthSecretArn': app['OAuthSecretArn'],
         'ReservedConcurrency': concurrency,
     }
-    result = apply_stack(
-        session,
-        STACK,
-        template,
-        parameters
-        | {
-            'DeploymentMode': 'production',
-            'RuntimeRoleArn': 'arn:aws:iam::249766001220:role/markdown-mcp-service-lambda-role',
-        },
-    )
-    preview = apply_stack(
-        session,
-        PREVIEW_STACK,
-        template,
-        parameters
-        | {
-            'DeploymentMode': 'preview',
-            'RuntimeRoleArn': result['RuntimeRoleArn'],
-        },
-    )
-    if preview['PublicBaseUrl'] == base or preview['ClientId'] == app['ClientId']:
-        raise ValueError('Preview must use an isolated CloudFront origin and Cognito client')
-    deploy.verify_endpoint(preview['PublicBaseUrl'])
+    result = apply_stack(session, STACK, template, parameters)
+    deploy.verify_endpoint(result['Origin'] + result['OriginPath'], base)
     return result | {
         'image': image,
         'release_id': release,
         'public_base_url': base,
         'production_cutover': False,
-        'preview': preview_binding(preview),
+        'concurrency_cap': 10,
+        'reserved_concurrency': concurrency,
     }
-
-
-def preview_binding(state: dict) -> dict:
-    """Bind private preview evidence to the exact URL, client, version and image."""
-    return {
-        key: state[key]
-        for key in (
-            'PublicBaseUrl',
-            'ClientId',
-            'Version',
-            'ImageUri',
-            'ReleaseId',
-            'PreviewDistributionId',
-        )
-    }
-
-
-def validate_acceptance(evidence: dict, release: str, preview: dict) -> None:
-    """Require complete, recent, revision-bound evidence before an origin switch."""
-    if evidence.get('release_id') != release or evidence.get('checks') != dict.fromkeys(
-        CHECKS, True
-    ):
-        raise ValueError('All required acceptance checks must pass for this exact release')
-    if evidence.get('preview') != preview or preview.get('ReleaseId') != release:
-        raise ValueError('Acceptance must bind the exact isolated preview configuration')
-    observed = datetime.fromisoformat(evidence.get('observed_at', ''))
-    age = (datetime.now(timezone.utc) - observed).total_seconds()
-    if age < 0 or age > 86400 or not evidence.get('evidence_path'):
-        raise ValueError('Acceptance requires evidence references observed within 24 hours')
 
 
 def edge_origin(session) -> dict:
@@ -262,19 +199,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=['deploy', 'cutover', 'rollback'])
     parser.add_argument('--image')
-    parser.add_argument('--concurrency', type=int, choices=range(1, 11), default=2)
     parser.add_argument('--release', default='/tmp/markdown-mcp-serverless.json')
-    parser.add_argument('--acceptance')
     parser.add_argument('--rollback', default='/tmp/markdown-mcp-edge-rollback.json')
     parser.add_argument('--result', default='/tmp/markdown-mcp-serverless-result.json')
     args = parser.parse_args()
     session = deploy.github_session()
     if args.action == 'deploy':
-        result = deploy_lambda(session, args.image or '', args.concurrency)
+        result = deploy_lambda(session, args.image or '')
         Path(args.release).write_text(json.dumps(result, indent=2) + '\n')
     elif args.action == 'cutover':
-        if not args.acceptance:
-            parser.error('--acceptance is required for cutover')
         release = json.loads(Path(args.release).read_text())
         current_release = outputs(deploy.stack_state(session.client('cloudformation'), STACK))
         if any(
@@ -285,16 +218,9 @@ def main() -> None:
                 ('Origin', 'Origin'),
             )
         ):
-            raise ValueError('Saved release no longer matches the deployed canary stack')
-        preview = preview_binding(
-            outputs(deploy.stack_state(session.client('cloudformation'), PREVIEW_STACK))
-        )
-        if preview != release['preview'] or preview['ImageUri'] != release['image']:
-            raise ValueError(
-                'Preview acceptance no longer matches the deployed image and configuration'
-            )
-        validate_acceptance(
-            json.loads(Path(args.acceptance).read_text()), release['release_id'], preview
+            raise ValueError('Saved release no longer matches the deployed Lambda stack')
+        deploy.verify_endpoint(
+            release['Origin'] + release['OriginPath'], release['public_base_url']
         )
         current = edge_origin(session)
         Path(args.rollback).write_text(json.dumps(current, indent=2) + '\n')
