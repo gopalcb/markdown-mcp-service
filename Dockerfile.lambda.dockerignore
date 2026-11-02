@@ -1,0 +1,7 @@
+**
+!app.py
+!requirements.txt
+!mcp_services/
+!mcp_services/*.py
+!services/
+!services/*.py

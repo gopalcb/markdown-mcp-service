@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import hmac
 import logging
 import time
 
@@ -215,12 +216,14 @@ class MarkdownOAuthProxy(OAuthProxy):
 def create_oauth(
     config: dict, state_store=None, signing_key: str | None = None, verifier=None
 ) -> MarkdownOAuthProxy:
-    """Build the maintained adapter with a persistent key and encrypted shared state."""
+    """Build the adapter with persistent state and a separately derived preview key."""
     if state_store is None or signing_key is None:
         options = Config(connect_timeout=5, read_timeout=10, retries={'total_max_attempts': 1})
         session = boto3.Session(region_name='ca-central-1')
         state_store = OAuthStateStore(
-            session.client('dynamodb', config=options), config['OAUTH_STATE_TABLE']
+            session.client('dynamodb', config=options),
+            config['OAUTH_STATE_TABLE'],
+            config.get('OAUTH_STATE_NAMESPACE', ''),
         )
         secrets = session.client('secretsmanager', config=options)
         try:
@@ -231,6 +234,10 @@ def create_oauth(
             secrets.close()
     if len(signing_key) < 32:
         raise ValueError('OAuth signing key must contain at least 32 random characters')
+    if config.get('OAUTH_STATE_NAMESPACE') == 'preview':
+        signing_key = hmac.new(
+            signing_key.encode(), b'markdown-mcp-preview-key-v1', hashlib.sha256
+        ).hexdigest()
     encrypted = FernetEncryptionWrapper(
         key_value=state_store,
         source_material=signing_key,

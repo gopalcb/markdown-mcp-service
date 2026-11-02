@@ -17,6 +17,18 @@ Resources:
       RepositoryName: markdown-mcp-service
       ImageTagMutability: IMMUTABLE
       ImageScanningConfiguration: {ScanOnPush: true}
+      RepositoryPolicyText:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: LambdaImageRetrieval
+            Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: [ecr:BatchGetImage, ecr:GetDownloadUrlForLayer]
+            Condition:
+              ArnLike:
+                aws:SourceArn:
+                  - arn:aws:lambda:ca-central-1:249766001220:function:markdown-mcp-service
+                  - arn:aws:lambda:ca-central-1:249766001220:function:markdown-mcp-service-preview
   Logs:
     Type: AWS::Logs::LogGroup
     Properties:
